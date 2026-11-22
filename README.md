@@ -32,9 +32,16 @@ powershell -ExecutionPolicy Bypass -File build.ps1
 
 The result is in `dist\`. Release builds are made by GitHub Actions from this repository.
 
-## Code signing
+## Code signing policy
 
-See [CODE_SIGNING_POLICY.md](CODE_SIGNING_POLICY.md).
+Free code signing provided by [SignPath.io](https://about.signpath.io), certificate by [SignPath Foundation](https://signpath.org)
+(once the project is approved). Team roles and the privacy statement are in the
+[Code signing policy](CODE_SIGNING_POLICY.md).
+
+## Privacy
+
+This program will not transfer any information to other networked systems unless specifically requested by the
+user or the person installing or operating it. See the [Code signing policy](CODE_SIGNING_POLICY.md) for details.
 
 ## License
 

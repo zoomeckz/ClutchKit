@@ -1,0 +1,40 @@
+name: Build
+
+# Every push builds ClutchKit from source. Pushing a tag like v2.3 also publishes a GitHub release.
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        shell: powershell
+        run: .\build.ps1
+
+      - name: Upload build
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: ClutchKit
+          path: dist/
+
+      # Code signing (SignPath) is added here once the project is approved by the SignPath Foundation.
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "${{ github.ref_name }}"
+          gh release create $tag (Get-Item dist\*.zip).FullName --title "ClutchKit $($tag.TrimStart('v'))" --notes "See README for install and setup."

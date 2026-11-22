@@ -1,0 +1,25 @@
+# Code signing policy
+
+Free code signing provided by [SignPath.io](https://about.signpath.io/), certificate by [SignPath Foundation](https://signpath.org/).
+
+## What gets signed
+
+Only `ClutchKit.exe` built by this repository's GitHub Actions workflow (`.github/workflows/build.yml`) from the
+source code in this repository. Nothing built on a personal computer is signed, and no third-party binaries are
+included or signed.
+
+## Team roles
+
+- **Committers and reviewers:** the repository owner
+- **Approvers** (approve each signing request): the repository owner
+
+All team members use multi-factor authentication for GitHub and SignPath.
+
+## Privacy policy
+
+This program will not transfer any information to other networked systems unless specifically requested by the
+user or the person installing or operating it.
+
+ClutchKit runs a small web server that is only reachable from the same computer (`127.0.0.1`), so that the
+TikTok LIVE Studio overlay on that computer can show the counters. It does not connect to the internet.
+The keyboard is only used to react to the hotkeys the user sets; key presses are not stored or sent anywhere.

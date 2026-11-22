@@ -1,0 +1,63 @@
+ClutchKit 2.2 - stream toolkit for TikTok LIVE Studio
+======================================================
+Counters for anything you want to track (deaths, wins, kills, attempts...), each with
+its own hotkeys, shown live on stream with your own font, colors and animations.
+
+
+INSTALL
+-------
+1. Unzip this folder and double-click ClutchKit.exe.
+
+2. If Windows shows "Windows protected your PC":
+   click "More info", then "Run anyway".
+   (Windows shows this for small apps that aren't code-signed yet.)
+
+3. Click "Install". ClutchKit opens and adds itself to the Start menu
+   (and the desktop, if you leave that box ticked). No admin rights needed.
+
+   Prefer not to install? Click "Run without installing" - ClutchKit then
+   keeps its files next to ClutchKit.exe.
+
+
+ADD IT TO TIKTOK LIVE STUDIO
+----------------------------
+In ClutchKit, open "Display":
+
+  Link overlay (recommended, see-through):
+    1. Click "Copy LIVE Studio link".
+    2. In LIVE Studio: Add source > Link > paste (Ctrl+V) > Add source.
+    3. Resize and place it. You only do this once - changes you make in
+       ClutchKit show up on stream automatically, and it doesn't matter
+       whether you start LIVE Studio or ClutchKit first.
+
+  Capture window:
+    Pick "Capture window", then in LIVE Studio: Add source > Window capture >
+    "ClutchKit - Overlay". Keep that window open (it can sit behind your
+    game, just don't minimize it).
+
+
+USING IT
+--------
+The first counter is "Deaths" with these keys:
+  Numpad +   add one
+  Numpad -   remove one
+  Numpad *   reset to 0
+
+On the "Counters" page you can rename it, add more counters (up to 8) and give
+each one its own keys: click a key button, then press the key you want.
+The keys keep working while you're in a game, and your game still gets the key press.
+
+Closing the window keeps ClutchKit running by the clock (red icon with three lines).
+Double-click the icon to open it again, right-click it to exit.
+
+
+UNINSTALL
+---------
+Windows Settings > Apps > Installed apps > ClutchKit > Uninstall.
+
+
+PRIVACY
+-------
+ClutchKit doesn't send anything over the internet. The LIVE Studio overlay
+talks to ClutchKit on your own PC only (127.0.0.1). The keyboard is only
+used to react to your chosen hotkeys; nothing you type is stored.

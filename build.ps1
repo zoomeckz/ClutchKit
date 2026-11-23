@@ -23,8 +23,9 @@ if ($LASTEXITCODE) { throw 'Icon build failed' }
 $csc = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
 Push-Location $obj
 try {
+    $sources = Get-ChildItem (Join-Path $root 'src') -Filter *.cs | ForEach-Object { $_.FullName }
     & $csc /nologo /target:winexe /optimize+ /win32icon:ClutchKit.ico /resource:ClutchKit.ico,ClutchKit.ico `
-        "/out:$dist\ClutchKit.exe" /r:System.Windows.Forms.dll /r:System.Drawing.dll (Join-Path $root 'src\ClutchKit.cs')
+        "/out:$dist\ClutchKit.exe" /r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.Web.Extensions.dll $sources
     if ($LASTEXITCODE) { throw 'Compile failed' }
 }
 finally { Pop-Location }

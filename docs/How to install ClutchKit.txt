@@ -1,7 +1,8 @@
-ClutchKit 2.2 - stream toolkit for TikTok LIVE Studio
+ClutchKit 3.0 - stream toolkit for TikTok LIVE Studio
 ======================================================
 Counters for anything you want to track (deaths, wins, kills, attempts...), each with
 its own hotkeys, shown live on stream with your own font, colors and animations.
+Gift actions: when a viewer sends a gift, ClutchKit presses keys in your game.
 
 
 INSTALL
@@ -51,6 +52,33 @@ Closing the window keeps ClutchKit running by the clock (red icon with three lin
 Double-click the icon to open it again, right-click it to exit.
 
 
+GIFT ACTIONS (GIFTS PRESS KEYS IN YOUR GAME)
+--------------------------------------------
+1. Get a free Euler Stream API key: on the "TikTok LIVE" page click
+   "Get a free key", make an account and copy your API key.
+   (TikTok has no official way to read LIVE gifts; Euler Stream does it for you.)
+2. On the "TikTok LIVE" page, type your TikTok username, paste the key and
+   click "Connect". Tick "Connect automatically" so you never have to do it again.
+   If you aren't live yet, ClutchKit waits and connects when you go live.
+3. On the "Gift actions" page click "+ Add gift action":
+     Gift        the gift's name, e.g. Rose (several: Rose, GG). Empty = any gift.
+     min. coins  only gifts worth at least this much (e.g. 100 for big gifts).
+     Press a key the key to press in your game, and how long to hold it.
+     Type text   types text, e.g. a Minecraft command. "First" = a key pressed
+                 before typing (T opens the chat in Minecraft).
+     Times       how many times per gift.
+     For every gift in a combo: a x10 Rose combo runs it 10 times
+                 (untick: once per combo).
+4. Use "Test in 3 s" (or "Test with a fake gift"), click into your game and watch.
+
+Tips:
+- "Only press keys in": pick your game, so gifts never type into chat or Discord.
+- Set an "On/off key" to stop gift actions instantly, e.g. while you're in a menu.
+- If your game runs as administrator, Windows blocks keys from normal programs.
+  ClutchKit tells you, and "Restart as administrator" fixes it.
+- Games with strict anti-cheat (e.g. Valorant, Fortnite) may ignore pressed keys.
+
+
 UNINSTALL
 ---------
 Windows Settings > Apps > Installed apps > ClutchKit > Uninstall.
@@ -58,6 +86,8 @@ Windows Settings > Apps > Installed apps > ClutchKit > Uninstall.
 
 PRIVACY
 -------
-ClutchKit doesn't send anything over the internet. The LIVE Studio overlay
-talks to ClutchKit on your own PC only (127.0.0.1). The keyboard is only
-used to react to your chosen hotkeys; nothing you type is stored.
+The LIVE Studio overlay talks to ClutchKit on your own PC only (127.0.0.1).
+The keyboard is only used to react to your chosen hotkeys; nothing you type is stored.
+The only internet connection is the TikTok LIVE connection, and only when you
+connect: your TikTok username and Euler Stream key go to Euler Stream, which
+sends back your LIVE's gifts. The key is saved in settings.ini on your PC.

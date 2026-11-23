@@ -21,5 +21,11 @@ This program will not transfer any information to other networked systems unless
 user or the person installing or operating it.
 
 ClutchKit runs a small web server that is only reachable from the same computer (`127.0.0.1`), so that the
-TikTok LIVE Studio overlay on that computer can show the counters. It does not connect to the internet.
+TikTok LIVE Studio overlay on that computer can show the counters.
 The keyboard is only used to react to the hotkeys the user sets; key presses are not stored or sent anywhere.
+Gift actions press the keys the user chose (or type the text the user entered) when a gift arrives.
+
+The only internet connection is the optional TikTok LIVE connection: when the user presses **Connect** (or turns
+on "Connect automatically"), ClutchKit sends the TikTok username and the user's own Euler Stream API key to
+Euler Stream (`wss://ws.eulerstream.com`), which sends back the LIVE's events. The API key is stored in
+`settings.ini` on the user's computer and is not sent anywhere else.

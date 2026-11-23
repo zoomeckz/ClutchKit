@@ -1,7 +1,8 @@
 // ClutchKit - stream toolkit for TikTok LIVE Studio.
 // ----------------------------------------------------------------------------------
-// Counters (as many as you like, each with its own hotkeys and its own look) shown in one overlay.
-// Menu: Counters (what you track) > Overlay (how it gets on stream) > Settings (app options).
+// Counters (as many as you like, each with its own hotkeys and its own look) shown in one overlay,
+// and gift actions: TikTok LIVE gifts press keys in your game (Actions.cs, TikTok.cs, ActionsPage.cs).
+// Menu: Counters > Gift actions > TikTok LIVE > Overlay (how it gets on stream) > Settings (app options).
 // Overlay modes:
 //   - Link overlay: a "data:" link pasted once into LIVE Studio (Add source > Link). It loads the
 //     overlay script from this app (http://127.0.0.1:<port>, this PC only), so every change made in
@@ -11,11 +12,10 @@
 // (%LOCALAPPDATA%\Programs\ClutchKit, Start menu shortcut, uninstall entry; no admin). Data then
 // lives in %APPDATA%\ClutchKit. A copy next to counts.txt / settings.ini runs "portable" from there.
 // "ClutchKit.exe /exit" asks a running copy to close itself properly (used when updating).
+// "ClutchKit.exe /restart" waits for the running copy to close first (used by "Restart as administrator").
 //
-// Build (no extra tools needed):
-//   C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe /target:winexe /optimize+
-//     /win32icon:ClutchKit.ico /resource:ClutchKit.ico,ClutchKit.ico
-//     /out:ClutchKit.exe /r:System.Windows.Forms.dll /r:System.Drawing.dll ClutchKit.cs
+// Build (no extra tools needed): powershell -ExecutionPolicy Bypass -File build.ps1
+// (compiles every file in src\ with the C# compiler that ships with Windows)
 
 using System;
 using System.Collections.Generic;
@@ -39,14 +39,14 @@ using Microsoft.Win32;
 [assembly: AssemblyProduct("ClutchKit")]
 [assembly: AssemblyCompany("ClutchKit")]
 [assembly: AssemblyCopyright("Copyright (c) 2026 ClutchKit")]
-[assembly: AssemblyVersion("2.3.0.0")]
-[assembly: AssemblyFileVersion("2.3.0.0")]
-[assembly: AssemblyInformationalVersion("2.3")]
+[assembly: AssemblyVersion("3.0.0.0")]
+[assembly: AssemblyFileVersion("3.0.0.0")]
+[assembly: AssemblyInformationalVersion("3.0")]
 
 static class Program
 {
     public const string Name = "ClutchKit";
-    public const string Version = "2.3";
+    public const string Version = "3.0";
     // Shared with the older "Death Counter" builds so old and new never run (and count) at the same time.
     public static string MutexName = "Local\\DeathCounterTikTok";
 
@@ -57,6 +57,9 @@ static class Program
     static void Main(string[] args)
     {
         SetProcessDPIAware();
+        // allow modern TLS for the TikTok LIVE connection (older .NET defaults don't include it)
+        try { ServicePointManager.SecurityProtocol |= (SecurityProtocolType)3072; } catch { }    // TLS 1.2
+        try { ServicePointManager.SecurityProtocol |= (SecurityProtocolType)12288; } catch { }   // TLS 1.3
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
 
@@ -96,6 +99,12 @@ static class Program
         bool createdNew;
         using (Mutex mutex = new Mutex(true, MutexName, out createdNew))
         {
+            if (!createdNew && args.Length > 0 && args[0].Equals("/restart", StringComparison.OrdinalIgnoreCase))
+            {
+                // restarted by the running copy (e.g. as administrator): wait for it to close
+                try { createdNew = mutex.WaitOne(20000); }
+                catch (AbandonedMutexException) { createdNew = true; }
+            }
             if (!createdNew)
             {
                 // Already running: ask the running copy to open its window.
@@ -455,6 +464,18 @@ public class Settings
     public bool StartInTray = false, TrayHintShown = false;
     public int Port = 8787;
 
+    // gift actions
+    public const int MaxRules = 30;
+    public List<GiftRule> Rules = new List<GiftRule>();
+    public bool ActionsOn = true;
+    public Hotkey PauseKey = new Hotkey(0, 0);   // turns gift actions on/off while you play
+    public string OnlyProcess = "";              // only press keys while this program is in front ("" = any)
+    public int GapMs = 80;                       // pause between actions
+    public int MaxQueue = 50;                    // actions waiting at most; more are skipped
+    // TikTok LIVE connection
+    public string TikTokUser = "", TikTokKey = "";
+    public bool AutoConnect = false;
+
     public static string ToHex(Color c) { return "#" + c.R.ToString("x2") + c.G.ToString("x2") + c.B.ToString("x2"); }
     public static string CleanFont(string v) { return v.Trim().Replace("'", "").Replace("\"", ""); }
 
@@ -511,6 +532,25 @@ public class Settings
                 s.CaptureBounds = new Rectangle(x, y, w, h);
         }
 
+        if (kv.TryGetValue("actions.on", out v)) s.ActionsOn = ParseBool(v, true);
+        if (kv.TryGetValue("actions.pausekey", out v)) s.PauseKey = Hotkey.Parse(v.Trim(), s.PauseKey);
+        if (kv.TryGetValue("actions.onlyprogram", out v)) s.OnlyProcess = KeySender.CleanProcessName(v);
+        if (kv.TryGetValue("actions.gapms", out v)) s.GapMs = ParseInt(v, s.GapMs, 0, 5000);
+        if (kv.TryGetValue("actions.maxqueue", out v)) s.MaxQueue = ParseInt(v, s.MaxQueue, 1, 1000);
+        if (kv.TryGetValue("tiktok.user", out v)) s.TikTokUser = v.Trim();
+        if (kv.TryGetValue("tiktok.apikey", out v)) s.TikTokKey = v.Trim();
+        if (kv.TryGetValue("tiktok.autoconnect", out v)) s.AutoConnect = ParseBool(v, false);
+        if (kv.TryGetValue("rules", out v))
+        {
+            foreach (string part in v.Split(','))
+            {
+                int id;
+                if (!int.TryParse(part.Trim(), out id) || id <= 0 || s.FindRule(id) != null) continue;
+                s.Rules.Add(GiftRule.Read(kv, id));
+                if (s.Rules.Count >= MaxRules) break;
+            }
+        }
+
         // the look from older versions (one look for everything) becomes every counter's starting look
         Style shared = new Style();
         shared.Read(kv, "");
@@ -561,6 +601,12 @@ public class Settings
         return null;
     }
 
+    public GiftRule FindRule(int id)
+    {
+        foreach (GiftRule r in Rules) if (r.Id == id) return r;
+        return null;
+    }
+
     public void Save(string path)
     {
         StringBuilder b = new StringBuilder();
@@ -586,6 +632,18 @@ public class Settings
         b.AppendLine("startInTray=" + StartInTray);
         b.AppendLine("trayHintShown=" + TrayHintShown);
         b.AppendLine("port=" + Port);
+        b.AppendLine("actions.on=" + ActionsOn);
+        b.AppendLine("actions.pauseKey=" + PauseKey.Serialize());
+        b.AppendLine("actions.onlyProgram=" + OnlyProcess);
+        b.AppendLine("actions.gapMs=" + GapMs);
+        b.AppendLine("actions.maxQueue=" + MaxQueue);
+        List<string> rids = new List<string>();
+        foreach (GiftRule r in Rules) rids.Add(r.Id.ToString());
+        b.AppendLine("rules=" + string.Join(",", rids.ToArray()));
+        foreach (GiftRule r in Rules) r.Write(b);
+        b.AppendLine("tiktok.user=" + TikTokUser);
+        b.AppendLine("tiktok.apiKey=" + TikTokKey);
+        b.AppendLine("tiktok.autoConnect=" + AutoConnect);
         try { File.WriteAllText(path, b.ToString()); } catch { }
     }
 }
@@ -619,7 +677,12 @@ public class App : ApplicationContext
     public bool CapturingHotkey;
     public string ServerError;
 
-    public event EventHandler CountChanged, SettingsChanged, Animated;
+    public event EventHandler CountChanged, SettingsChanged, Animated, ActionsToggled;
+    public event Action<string> Logged;   // a new line in the activity log (UI thread)
+
+    public GiftEngine Engine;
+    public TikTokLive TikTok;
+    readonly List<string> log = new List<string>();
 
     volatile string stateJson = "{}";
     volatile int firstCount;
@@ -660,10 +723,14 @@ public class App : ApplicationContext
         server = new OverlayServer(S.Port, this);
         ServerError = server.Start();
 
+        Engine = new GiftEngine(this);
+        TikTok = new TikTokLive(this);
+
         BuildTray();
         hookProc = OnKey;
         hook = SetWindowsHookEx(WH_KEYBOARD_LL, hookProc, GetModuleHandle(null), 0);
         if (!testMode) StartListeners();
+        if (!testMode && S.AutoConnect && S.TikTokUser.Length > 0 && S.TikTokKey.Length > 0) TikTok.Start(S.TikTokUser, S.TikTokKey);
 
         if (S.Mode == "window") ShowCapture();
         if (!S.StartInTray) ShowMain();
@@ -800,9 +867,75 @@ public class App : ApplicationContext
         Raise(SettingsChanged);
     }
 
+    // ---------------- gift actions ----------------
+
+    // Runs code on the UI thread (safe to call from any thread).
+    public void Ui(MethodInvoker m)
+    {
+        try { marshal.BeginInvoke(m); } catch { }
+    }
+
+    // Adds a line to the activity log (any thread).
+    public void Log(string text)
+    {
+        string line = DateTime.Now.ToString("HH:mm:ss") + "  " + text;
+        Ui(delegate
+        {
+            log.Add(line);
+            if (log.Count > 300) log.RemoveRange(0, log.Count - 300);
+            if (Logged != null) Logged(line);
+        });
+    }
+
+    public List<string> LogLines { get { return new List<string>(log); } }
+
+    public void SetActionsOn(bool on)
+    {
+        if (S.ActionsOn == on) return;
+        S.ActionsOn = on;
+        if (!on) Engine.Clear();
+        S.Save(SettingsFile);
+        Log(on ? "Gift actions turned on." : "Gift actions paused - gifts won't press any keys.");
+        Raise(ActionsToggled);
+    }
+
+    public GiftRule AddRule()
+    {
+        if (S.Rules.Count >= Settings.MaxRules) return null;
+        GiftRule r = new GiftRule();
+        foreach (GiftRule o in S.Rules) r.Id = Math.Max(r.Id, o.Id);
+        r.Id++;
+        S.Rules.Add(r);
+        ApplySettings();
+        return r;
+    }
+
+    public void RemoveRule(GiftRule r)
+    {
+        S.Rules.Remove(r);
+        ApplySettings();
+    }
+
+    // Games that run as administrator ignore keys from normal programs (a Windows rule), so
+    // ClutchKit has to run as administrator too. Starts an elevated copy, then closes this one.
+    public void RestartAsAdmin()
+    {
+        try
+        {
+            ProcessStartInfo psi = new ProcessStartInfo(Application.ExecutablePath, "/restart");
+            psi.UseShellExecute = true;
+            psi.Verb = "runas";
+            Process.Start(psi);
+        }
+        catch { return; }   // the Windows prompt was cancelled
+        ExitApp();
+    }
+
     // Who already uses this key (for the "already used" message), or null.
+    // exceptAction -2 = the gift actions on/off key.
     public string KeyOwner(Hotkey hk, Counter exceptCounter, int exceptAction)
     {
+        if (exceptAction != -2 && S.PauseKey.Same(hk)) return "Gift actions on/off";
         foreach (Counter c in S.Counters)
             for (int a = 0; a < 3; a++)
                 if (!(c == exceptCounter && a == exceptAction) && c.Keys[a].Same(hk))
@@ -890,12 +1023,14 @@ public class App : ApplicationContext
         {
             int vk = Marshal.ReadInt32(lParam) & 0xFF;
             int m = (int)wParam;
+            // keys pressed by ClutchKit's own gift actions (KBDLLHOOKSTRUCT.dwExtraInfo)
+            bool own = Marshal.ReadIntPtr(lParam, 16) == KeySender.Tag;
             if (m == WM_KEYDOWN || m == WM_SYSKEYDOWN)
             {
                 if (!held[vk])               // ignore auto-repeat while the key is held down
                 {
                     held[vk] = true;
-                    if (!IsModifier(vk)) HandleKey(vk, CurrentMods());
+                    if (!IsModifier(vk)) HandleKey(vk, CurrentMods(), own);
                 }
             }
             else if (m == WM_KEYUP || m == WM_SYSKEYUP)
@@ -906,10 +1041,12 @@ public class App : ApplicationContext
         return CallNextHookEx(hook, nCode, wParam, lParam);
     }
 
-    void HandleKey(int vk, int mods)
+    void HandleKey(int vk, int mods, bool own)
     {
         if (CapturingHotkey) return;
         Hotkey pressed = new Hotkey(mods, vk);
+        // a gift can press a counter's key (e.g. a Rose adds a death), but never the on/off key
+        if (!own && pressed.Same(S.PauseKey)) marshal.BeginInvoke((MethodInvoker)delegate { SetActionsOn(!S.ActionsOn); });
         foreach (Counter c in S.Counters)
         {
             Counter target = c;
@@ -1043,6 +1180,8 @@ public class App : ApplicationContext
         S.Save(SettingsFile);
         SaveCounts();
         if (hook != IntPtr.Zero) { UnhookWindowsHookEx(hook); hook = IntPtr.Zero; }
+        TikTok.Stop();
+        Engine.Clear();
         server.Stop();
         if (tray != null) { tray.Visible = false; tray.Dispose(); }
         if (main != null && !main.IsDisposed) { main.AllowClose = true; main.Close(); }
@@ -1930,7 +2069,7 @@ public class StyleForm : Form
     void Changed() { if (!loading) app.ApplySettings(); }
 }
 
-public class MainForm : Form
+public partial class MainForm : Form
 {
     readonly App app;
     readonly Panel nav, content;
@@ -1983,6 +2122,8 @@ public class MainForm : Form
         // Menu order: what you track > how it gets on stream > app options
         loading = true;
         AddPage("Counters", BuildCountersPage());
+        AddPage("Gift actions", BuildActionsPage());
+        AddPage("TikTok LIVE", BuildTikTokPage());
         AddPage("Overlay", BuildOverlayPage());
         AddPage("Settings", BuildSettingsPage());
         loading = false;
@@ -2245,6 +2386,7 @@ public class MainForm : Form
 
     void CancelCapture()
     {
+        CancelKeyCapture();
         if (capAction < 0) return;
         capCounter = null;
         capAction = -1;
@@ -2257,6 +2399,7 @@ public class MainForm : Form
 
     protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
     {
+        if (keyCapBtn != null) return KeyCaptureKey(keyData);   // gift action keys (ActionsPage.cs)
         if (capAction < 0) return base.ProcessCmdKey(ref msg, keyData);
         Keys key = keyData & Keys.KeyCode;
         if (key == Keys.ControlKey || key == Keys.ShiftKey || key == Keys.Menu || key == Keys.LWin || key == Keys.RWin ||
@@ -2309,6 +2452,7 @@ public class MainForm : Form
     protected override void OnDeactivate(EventArgs e)
     {
         base.OnDeactivate(e);
+        if (keyCapBtn != null && !ContainsFocus) CancelKeyCapture();
         if (capAction >= 0 && !ContainsFocus) { CancelCapture(); Message("Cancelled (you clicked away) - nothing changed.", UI.Muted); }
     }
 
@@ -2413,6 +2557,7 @@ public class MainForm : Form
     {
         app.CountChanged -= OnCount;
         app.SettingsChanged -= OnSettings;
+        UnhookActionPages();
         base.OnFormClosed(e);
     }
 }

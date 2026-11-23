@@ -39,14 +39,14 @@ using Microsoft.Win32;
 [assembly: AssemblyProduct("ClutchKit")]
 [assembly: AssemblyCompany("ClutchKit")]
 [assembly: AssemblyCopyright("Copyright (c) 2026 ClutchKit")]
-[assembly: AssemblyVersion("3.1.0.0")]
-[assembly: AssemblyFileVersion("3.1.0.0")]
-[assembly: AssemblyInformationalVersion("3.1")]
+[assembly: AssemblyVersion("3.2.0.0")]
+[assembly: AssemblyFileVersion("3.2.0.0")]
+[assembly: AssemblyInformationalVersion("3.2")]
 
 static class Program
 {
     public const string Name = "ClutchKit";
-    public const string Version = "3.1";
+    public const string Version = "3.2";
     // Shared with the older "Death Counter" builds so old and new never run (and count) at the same time.
     public static string MutexName = "Local\\DeathCounterTikTok";
 
@@ -57,6 +57,7 @@ static class Program
     static void Main(string[] args)
     {
         SetProcessDPIAware();
+        L.Use(L.Detect());   // the setup window speaks the Windows language; the saved choice is applied once settings load
         // allow modern TLS for the TikTok LIVE connection (older .NET defaults don't include it)
         try { ServicePointManager.SecurityProtocol |= (SecurityProtocolType)3072; } catch { }    // TLS 1.2
         try { ServicePointManager.SecurityProtocol |= (SecurityProtocolType)12288; } catch { }   // TLS 1.3
@@ -89,7 +90,7 @@ static class Program
             if (choice == SetupForm.Install)
             {
                 string error = Installer.Install(exe, desktop);
-                if (error != null) { MessageBox.Show("ClutchKit couldn't be installed:\n\n" + error, "ClutchKit"); return; }
+                if (error != null) { MessageBox.Show(L.T("ClutchKit couldn't be installed:") + "\n\n" + error, "ClutchKit"); return; }
                 try { Process.Start(Installer.InstalledExe); } catch { }
                 return;
             }
@@ -109,7 +110,7 @@ static class Program
             {
                 // Already running: ask the running copy to open its window.
                 try { EventWaitHandle.OpenExisting(App.ShowEventName).Set(); }
-                catch { MessageBox.Show("ClutchKit is already running (red icon by the clock).", "ClutchKit"); }
+                catch { MessageBox.Show(L.T("ClutchKit is already running (red icon by the clock)."), "ClutchKit"); }
                 return;
             }
             try
@@ -119,7 +120,7 @@ static class Program
             }
             catch (Exception ex)
             {
-                MessageBox.Show("ClutchKit couldn't start:\n\n" + ex.Message, "ClutchKit");
+                MessageBox.Show(L.T("ClutchKit couldn't start:") + "\n\n" + ex.Message, "ClutchKit");
             }
         }
     }
@@ -198,7 +199,7 @@ public static class Installer
     {
         try
         {
-            if (IsRunning()) return "ClutchKit is running. Exit it first (right-click the red icon by the clock > Exit), then try again.";
+            if (IsRunning()) return L.T("ClutchKit is running. Exit it first (right-click the red icon by the clock > Exit), then try again.");
             Directory.CreateDirectory(InstallDir);
             Directory.CreateDirectory(DataDir);
             if (!IsInstalledCopy(sourceExe)) File.Copy(sourceExe, InstalledExe, true);
@@ -242,16 +243,16 @@ public static class Installer
 
     public static void Uninstall()
     {
-        if (MessageBox.Show("Uninstall ClutchKit from this PC?", "ClutchKit", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+        if (MessageBox.Show(L.T("Uninstall ClutchKit from this PC?"), "ClutchKit", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
         // wait a moment in case ClutchKit is just closing (when uninstalling from inside the app)
         for (int i = 0; i < 25 && IsRunning(); i++) Thread.Sleep(200);
         if (IsRunning())
         {
-            MessageBox.Show("ClutchKit is still running. Exit it first (right-click the red icon by the clock > Exit), then uninstall again.", "ClutchKit");
+            MessageBox.Show(L.T("ClutchKit is still running. Exit it first (right-click the red icon by the clock > Exit), then uninstall again."), "ClutchKit");
             return;
         }
         bool deleteData = Directory.Exists(DataDir) &&
-            MessageBox.Show("Also delete your saved counts and settings?", "ClutchKit", MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2) == DialogResult.Yes;
+            MessageBox.Show(L.T("Also delete your saved counts and settings?"), "ClutchKit", MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2) == DialogResult.Yes;
         try { File.Delete(Path.Combine(StartMenuDir, "ClutchKit.lnk")); } catch { }
         try { File.Delete(Path.Combine(DesktopDir, "ClutchKit.lnk")); } catch { }
         try { Registry.CurrentUser.DeleteSubKeyTree(UninstallKey, false); } catch { }
@@ -266,7 +267,7 @@ public static class Installer
             Process.Start(psi);
         }
         catch { }
-        MessageBox.Show("ClutchKit has been uninstalled.", "ClutchKit");
+        MessageBox.Show(L.T("ClutchKit has been uninstalled."), "ClutchKit");
     }
 }
 
@@ -289,7 +290,7 @@ public class SetupForm : Form
 
     SetupForm()
     {
-        Text = "ClutchKit Setup";
+        Text = L.T("ClutchKit Setup");
         Icon = AppIcons.Full();
         BackColor = UI.Bg;
         ForeColor = UI.Text;
@@ -307,21 +308,20 @@ public class SetupForm : Form
         logo.Size = new Size(UI.D(64), UI.D(64));
         Controls.Add(logo);
 
-        UI.Lbl(this, (Installer.IsInstalled ? "Update ClutchKit to " : "Install ClutchKit ") + Program.Version, 116, 34, 420, 16f, UI.Text, FontStyle.Bold);
-        UI.Para(this, "Stream toolkit for TikTok LIVE Studio - counters with hotkeys, shown live on stream.", 118, 76, 420, 24);
-        UI.Para(this, "Installs for your Windows user only (no admin needed): adds ClutchKit to the Start menu and to " +
-                      "Windows Settings > Apps, where you can uninstall it any time." +
-                      (Installer.IsInstalled ? " Your saved counts and settings are kept." : ""), 118, 108, 420, 64);
+        UI.Lbl(this, Installer.IsInstalled ? L.F("Update ClutchKit to {0}", Program.Version) : L.F("Install ClutchKit {0}", Program.Version), 116, 34, 420, 16f, UI.Text, FontStyle.Bold);
+        UI.Para(this, L.T("Stream toolkit for TikTok LIVE Studio - counters with hotkeys, shown live on stream."), 118, 76, 420, 24);
+        UI.Para(this, L.T("Installs for your Windows user only (no admin needed): adds ClutchKit to the Start menu and to Windows Settings > Apps, where you can uninstall it any time.") +
+                      (Installer.IsInstalled ? " " + L.T("Your saved counts and settings are kept.") : ""), 118, 108, 420, 64);
         desktopBox = new CheckBox();
-        desktopBox.Text = "Also put a shortcut on the desktop";
+        desktopBox.Text = L.T("Also put a shortcut on the desktop");
         desktopBox.Checked = true;
         desktopBox.ForeColor = UI.Text;
         desktopBox.Location = new Point(UI.D(118), UI.D(180));
         desktopBox.AutoSize = true;
         Controls.Add(desktopBox);
 
-        Button install = UI.Btn(this, Installer.IsInstalled ? "Update" : "Install", 118, 228, 150, 42, true);
-        Button portable = UI.Btn(this, "Run without installing", 280, 228, 220, 42, false);
+        Button install = UI.Btn(this, Installer.IsInstalled ? L.T("Update") : L.T("Install"), 118, 228, 150, 42, true);
+        Button portable = UI.Btn(this, L.T("Run without installing"), 280, 228, 220, 42, false);
         install.Click += delegate { choice = Install; Close(); };
         portable.Click += delegate { choice = Portable; Close(); };
         AcceptButton = install;
@@ -344,7 +344,7 @@ public struct Hotkey
 
     public override string ToString()
     {
-        if (Vk == 0) return "No key";
+        if (Vk == 0) return L.T("No key");
         List<string> parts = new List<string>();
         if ((Mods & Ctrl) != 0) parts.Add("Ctrl");
         if ((Mods & Alt) != 0) parts.Add("Alt");
@@ -436,7 +436,7 @@ public class Style
 // One counter: what it's called on stream, its icon, its hotkeys, its look and its number.
 public class Counter
 {
-    public static readonly string[] ActionNames = { "+1", "-1", "Reset" };
+    public static readonly string[] ActionNames = { "+1", "-1", L.N("Reset") };
 
     public int Id;
     public string Name = "Deaths:";
@@ -450,7 +450,7 @@ public class Counter
     public int Seq;
     public DateTime AnimStart = DateTime.MinValue;
 
-    public string DisplayName { get { string n = Name.Trim().TrimEnd(':').Trim(); return n.Length > 0 ? n : "Counter " + Id; } }
+    public string DisplayName { get { string n = Name.Trim().TrimEnd(':').Trim(); return n.Length > 0 ? n : L.F("Counter {0}", Id); } }
 }
 
 public class Settings
@@ -464,9 +464,14 @@ public class Settings
     public bool StartInTray = false, TrayHintShown = false;
     public int Port = 8787;
 
-    // actions
-    public const int MaxRules = 30;
+    // app
+    public string Language = "";                 // "" = follow the Windows language
+    public int LastPage = 0;                     // the settings window opens where you left off
+
+    // actions, sorted into topics (groups)
+    public const int MaxRules = 300, MaxGroups = 50;
     public List<GiftRule> Rules = new List<GiftRule>();
+    public List<RuleGroup> Groups = new List<RuleGroup>();
     public bool ActionsOn = true;
     public Hotkey PauseKey = new Hotkey(0, 0);   // turns actions on/off while you play
     public string OnlyProcess = "";              // only press keys while this program is in front ("" = any)
@@ -540,6 +545,18 @@ public class Settings
         if (kv.TryGetValue("tiktok.user", out v)) s.TikTokUser = v.Trim();
         if (kv.TryGetValue("tiktok.apikey", out v)) s.TikTokKey = v.Trim();
         if (kv.TryGetValue("tiktok.autoconnect", out v)) s.AutoConnect = ParseBool(v, false);
+        if (kv.TryGetValue("language", out v)) s.Language = Array.IndexOf(L.Codes, v.Trim()) >= 0 ? v.Trim() : "";
+        if (kv.TryGetValue("lastpage", out v)) s.LastPage = ParseInt(v, 0, 0, 20);
+        if (kv.TryGetValue("groups", out v))
+        {
+            foreach (string part in v.Split(','))
+            {
+                int id;
+                if (!int.TryParse(part.Trim(), out id) || id <= 0 || s.FindGroup(id) != null) continue;
+                s.Groups.Add(RuleGroup.Read(kv, id));
+                if (s.Groups.Count >= MaxGroups) break;
+            }
+        }
         if (kv.TryGetValue("rules", out v))
         {
             foreach (string part in v.Split(','))
@@ -550,6 +567,7 @@ public class Settings
                 if (s.Rules.Count >= MaxRules) break;
             }
         }
+        s.FixGroups();
 
         // the look from older versions (one look for everything) becomes every counter's starting look
         Style shared = new Style();
@@ -581,7 +599,7 @@ public class Settings
             // first run, or settings from the single-counter version: turn them into counter 1
             Counter c = new Counter();
             c.Id = 1;
-            c.Name = "Deaths:";
+            c.Name = L.T("Deaths:");
             c.Icon = "skull";
             c.Keys = new[] { new Hotkey(0, (int)Keys.Add), new Hotkey(0, (int)Keys.Subtract), new Hotkey(0, (int)Keys.Multiply) };
             if (kv.TryGetValue("label", out v)) c.Name = v.Trim();
@@ -605,6 +623,37 @@ public class Settings
     {
         foreach (GiftRule r in Rules) if (r.Id == id) return r;
         return null;
+    }
+
+    public RuleGroup FindGroup(int id)
+    {
+        foreach (RuleGroup g in Groups) if (g.Id == id) return g;
+        return null;
+    }
+
+    // Is this action's topic switched on?
+    public bool GroupOn(int id)
+    {
+        RuleGroup g = FindGroup(id);
+        return g == null || g.Enabled;
+    }
+
+    public RuleGroup NewGroup(string name)
+    {
+        RuleGroup g = new RuleGroup();
+        foreach (RuleGroup o in Groups) g.Id = Math.Max(g.Id, o.Id);
+        g.Id++;
+        g.Name = name;
+        Groups.Add(g);
+        return g;
+    }
+
+    // There's always at least one topic, and every action belongs to one that exists.
+    public void FixGroups()
+    {
+        if (Groups.Count == 0) NewGroup(L.T("My actions"));
+        foreach (GiftRule r in Rules)
+            if (FindGroup(r.GroupId) == null) r.GroupId = Groups[0].Id;
     }
 
     public void Save(string path)
@@ -637,6 +686,10 @@ public class Settings
         b.AppendLine("actions.onlyProgram=" + OnlyProcess);
         b.AppendLine("actions.gapMs=" + GapMs);
         b.AppendLine("actions.maxQueue=" + MaxQueue);
+        List<string> gids = new List<string>();
+        foreach (RuleGroup g in Groups) gids.Add(g.Id.ToString());
+        b.AppendLine("groups=" + string.Join(",", gids.ToArray()));
+        foreach (RuleGroup g in Groups) g.Write(b);
         List<string> rids = new List<string>();
         foreach (GiftRule r in Rules) rids.Add(r.Id.ToString());
         b.AppendLine("rules=" + string.Join(",", rids.ToArray()));
@@ -644,6 +697,8 @@ public class Settings
         b.AppendLine("tiktok.user=" + TikTokUser);
         b.AppendLine("tiktok.apiKey=" + TikTokKey);
         b.AppendLine("tiktok.autoConnect=" + AutoConnect);
+        b.AppendLine("language=" + Language);
+        b.AppendLine("lastPage=" + LastPage);
         try { File.WriteAllText(path, b.ToString()); } catch { }
     }
 }
@@ -715,6 +770,7 @@ public class App : ApplicationContext
         AppIcon = AppIcons.Full();
 
         S = Settings.Load(SettingsFile);
+        L.Use(L.Resolve(S.Language));
         LoadCounts();
         S.Save(SettingsFile);
         SaveCounts();
@@ -734,12 +790,12 @@ public class App : ApplicationContext
 
         if (S.Mode == "window") ShowCapture();
         if (!S.StartInTray) ShowMain();
-        else Notify("ClutchKit is running", "Double-click the red icon by the clock for settings.", ToolTipIcon.None);
+        else Notify(L.T("ClutchKit is running"), L.T("Double-click the red icon by the clock for settings."), ToolTipIcon.None);
 
         if (ServerError != null)
-            Notify("Overlay can't start", "Port " + S.Port + " is already in use. Close other copies of ClutchKit and start it again.", ToolTipIcon.Error);
+            Notify(L.T("Overlay can't start"), L.F("Port {0} is already in use. Close other copies of ClutchKit and start it again.", S.Port), ToolTipIcon.Error);
         if (!KeysOk)
-            Notify("Hotkeys couldn't be set up", "Exit and start ClutchKit again.", ToolTipIcon.Error);
+            Notify(L.T("Hotkeys couldn't be set up"), L.T("Exit and start ClutchKit again."), ToolTipIcon.Error);
     }
 
     // ---------------- counts ----------------
@@ -829,7 +885,7 @@ public class App : ApplicationContext
         Counter c = new Counter();
         foreach (Counter o in S.Counters) c.Id = Math.Max(c.Id, o.Id);
         c.Id++;
-        c.Name = "Counter " + (S.Counters.Count + 1) + ":";
+        c.Name = L.F("Counter {0}", S.Counters.Count + 1) + ":";
         if (S.Counters.Count > 0) c.Style = S.Counters[0].Style.Clone();   // start with the same look as the first one
         S.Counters.Add(c);
         SaveCounts();
@@ -895,17 +951,38 @@ public class App : ApplicationContext
         S.ActionsOn = on;
         if (!on) Engine.Clear();
         S.Save(SettingsFile);
-        Log(on ? "Actions turned on." : "Actions paused - nothing will play or press keys.");
+        Log(on ? L.T("Actions turned on.") : L.T("Actions paused - nothing will play or press keys."));
         Raise(ActionsToggled);
     }
 
-    public GiftRule AddRule()
+    int NextRuleId()
+    {
+        int id = 0;
+        foreach (GiftRule o in S.Rules) id = Math.Max(id, o.Id);
+        return id + 1;
+    }
+
+    // New action at the end of a topic (shown open, so it can be filled in right away).
+    public GiftRule AddRule(int groupId)
     {
         if (S.Rules.Count >= Settings.MaxRules) return null;
         GiftRule r = new GiftRule();
-        foreach (GiftRule o in S.Rules) r.Id = Math.Max(r.Id, o.Id);
-        r.Id++;
-        S.Rules.Add(r);
+        r.Id = NextRuleId();
+        r.GroupId = S.FindGroup(groupId) != null ? groupId : S.Groups[0].Id;
+        int at = S.Rules.FindLastIndex(delegate (GiftRule o) { return o.GroupId == r.GroupId; });
+        S.Rules.Insert(at + 1, r);
+        ApplySettings();
+        return r;
+    }
+
+    // Copy of an action, right below the original.
+    public GiftRule DuplicateRule(GiftRule src)
+    {
+        if (S.Rules.Count >= Settings.MaxRules) return null;
+        GiftRule r = src.Clone();
+        r.Id = NextRuleId();
+        r.Collapsed = false;
+        S.Rules.Insert(S.Rules.IndexOf(src) + 1, r);
         ApplySettings();
         return r;
     }
@@ -913,6 +990,34 @@ public class App : ApplicationContext
     public void RemoveRule(GiftRule r)
     {
         S.Rules.Remove(r);
+        ApplySettings();
+    }
+
+    public RuleGroup AddGroup(string name)
+    {
+        if (S.Groups.Count >= Settings.MaxGroups) return null;
+        RuleGroup g = S.NewGroup(name);
+        ApplySettings();
+        return g;
+    }
+
+    // Removes a topic and every action in it (the last topic can't be removed).
+    public void RemoveGroup(RuleGroup g)
+    {
+        if (S.Groups.Count <= 1) return;
+        S.Rules.RemoveAll(delegate (GiftRule r) { return r.GroupId == g.Id; });
+        S.Groups.Remove(g);
+        ApplySettings();
+    }
+
+    // Moves an action to the end of another topic.
+    public void MoveRule(GiftRule r, int groupId)
+    {
+        if (r.GroupId == groupId || S.FindGroup(groupId) == null) return;
+        S.Rules.Remove(r);
+        r.GroupId = groupId;
+        int at = S.Rules.FindLastIndex(delegate (GiftRule o) { return o.GroupId == groupId; });
+        S.Rules.Insert(at < 0 ? S.Rules.Count : at + 1, r);
         ApplySettings();
     }
 
@@ -935,11 +1040,11 @@ public class App : ApplicationContext
     // exceptAction -2 = the actions on/off key.
     public string KeyOwner(Hotkey hk, Counter exceptCounter, int exceptAction)
     {
-        if (exceptAction != -2 && S.PauseKey.Same(hk)) return "Actions on/off";
+        if (exceptAction != -2 && S.PauseKey.Same(hk)) return L.T("Actions on/off");
         foreach (Counter c in S.Counters)
             for (int a = 0; a < 3; a++)
                 if (!(c == exceptCounter && a == exceptAction) && c.Keys[a].Same(hk))
-                    return c.DisplayName + " " + Counter.ActionNames[a];
+                    return c.DisplayName + " " + L.T(Counter.ActionNames[a]);
         return null;
     }
 
@@ -1097,7 +1202,7 @@ public class App : ApplicationContext
         {
             S.TrayHintShown = true;
             S.Save(SettingsFile);
-            Notify("Still counting", "ClutchKit keeps running here by the clock. Double-click the red icon to open it, right-click to exit.", ToolTipIcon.Info);
+            Notify(L.T("Still counting"), L.T("ClutchKit keeps running here by the clock. Double-click the red icon to open it, right-click to exit."), ToolTipIcon.Info);
         }
     }
 
@@ -1139,20 +1244,52 @@ public class App : ApplicationContext
     void BuildTray()
     {
         tray = new NotifyIcon();
-        menu = new ContextMenuStrip();
-        menu.Items.Add(new ToolStripSeparator());
-        ToolStripItem open = menu.Items.Add("Open ClutchKit", null, delegate { ShowMain(); });
-        open.Font = new Font(open.Font, FontStyle.Bold);
-        menu.Items.Add("Copy LIVE Studio link", null, delegate { CopyLink(); Notify("Link copied", "In LIVE Studio: Add source > Link > paste (Ctrl+V).", ToolTipIcon.Info); });
-        captureItem = new ToolStripMenuItem("Show capture window", null, delegate { ShowCapture(); });
-        menu.Items.Add(captureItem);
-        menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add("Exit", null, delegate { ExitApp(); });
-        tray.ContextMenuStrip = menu;
+        BuildMenu();
         tray.DoubleClick += delegate { ShowMain(); };
         tray.Icon = AppIcons.Sized(SystemInformation.SmallIconSize.Width);
         UpdateTray();
         tray.Visible = !testMode;
+    }
+
+    // The tray icon's right-click menu (built again when the language changes).
+    void BuildMenu()
+    {
+        ContextMenuStrip old = menu;
+        countItems.Clear();
+        menu = new ContextMenuStrip();
+        menu.Items.Add(new ToolStripSeparator());
+        ToolStripItem open = menu.Items.Add(L.T("Open ClutchKit"), null, delegate { ShowMain(); });
+        open.Font = new Font(open.Font, FontStyle.Bold);
+        menu.Items.Add(L.T("Copy LIVE Studio link"), null, delegate { CopyLink(); Notify(L.T("Link copied"), L.T("In LIVE Studio: Add source > Link > paste (Ctrl+V)."), ToolTipIcon.Info); });
+        captureItem = new ToolStripMenuItem(L.T("Show capture window"), null, delegate { ShowCapture(); });
+        menu.Items.Add(captureItem);
+        menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add(L.T("Exit"), null, delegate { ExitApp(); });
+        tray.ContextMenuStrip = menu;
+        if (old != null) old.Dispose();
+    }
+
+    // Switches the whole app to another language ("" = the Windows language): the settings
+    // window and the tray menu are built again in the new language.
+    public void SetLanguage(string setting)
+    {
+        S.Language = setting;
+        S.LastPage = 0;   // come back to the General page
+        S.Save(SettingsFile);
+        L.Use(L.Resolve(setting));
+        BuildMenu();
+        UpdateTray();
+        if (main != null && !main.IsDisposed)
+        {
+            Point where = main.Location;
+            main.AllowClose = true;
+            main.Close();
+            main.Dispose();
+            main = new MainForm(this);
+            main.StartPosition = FormStartPosition.Manual;
+            main.Location = where;
+            ShowMain();
+        }
     }
 
     void UpdateTray()
@@ -1408,9 +1545,9 @@ public class OverlayServer
 public static class Renderer
 {
     public static readonly string[] IconKeys = { "skull", "crossbones", "coffin", "swords", "none" };
-    public static readonly string[] IconNames = { "Skull", "Skull and crossbones", "Coffin", "Crossed swords", "No icon" };
+    public static readonly string[] IconNames = { L.N("Skull"), L.N("Skull and crossbones"), L.N("Coffin"), L.N("Crossed swords"), L.N("No icon") };
     public static readonly string[] AnimKeys = { "none", "pop", "bounce", "shake", "flash", "slide" };
-    public static readonly string[] AnimNames = { "None", "Pop", "Bounce", "Shake", "Flash color", "Slide up" };
+    public static readonly string[] AnimNames = { L.N("None"), L.N("Pop"), L.N("Bounce"), L.N("Shake"), L.N("Flash color"), L.N("Slide up") };
 
     class Row
     {
@@ -1824,7 +1961,7 @@ public class PreviewPanel : Panel
         List<Counter> list = only != null ? new List<Counter> { only } : app.VisibleCounters();
         if (list.Count == 0)
         {
-            TextRenderer.DrawText(g, "No counter is set to show on stream.", UI.F(10f, FontStyle.Regular), ClientRectangle, UI.Muted,
+            TextRenderer.DrawText(g, L.T("No counter is set to show on stream."), UI.F(10f, FontStyle.Regular), ClientRectangle, UI.Muted,
                 TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
             return;
         }
@@ -1987,7 +2124,7 @@ public class StyleForm : Form
         this.app = app;
         c = counter;
         Style s = c.Style;
-        Text = "Appearance - " + c.DisplayName;
+        Text = L.T("Appearance") + " - " + c.DisplayName;
         Icon = app.AppIcon;
         BackColor = UI.Bg;
         ForeColor = UI.Text;
@@ -1999,11 +2136,11 @@ public class StyleForm : Form
         StartPosition = FormStartPosition.CenterParent;
         ClientSize = new Size(UI.D(660), UI.D(640));
 
-        UI.Lbl(this, "Appearance: " + c.DisplayName, 28, 20, 600, 16f, UI.Text, FontStyle.Bold);
-        UI.Para(this, "How this counter looks on stream. Changes show up in LIVE Studio right away.", 30, 60, 600, 24);
+        UI.Lbl(this, L.T("Appearance") + ": " + c.DisplayName, 28, 20, 600, 16f, UI.Text, FontStyle.Bold);
+        UI.Para(this, L.T("How this counter looks on stream. Changes show up in LIVE Studio right away."), 30, 60, 600, 24);
 
         // look
-        UI.FieldLabel(this, "Font", 30, 100);
+        UI.FieldLabel(this, L.T("Font"), 30, 100);
         ComboBox fontBox = UI.Combo(this, 190, 100, 250);
         using (InstalledFontCollection fonts = new InstalledFontCollection())
             foreach (FontFamily f in fonts.Families) fontBox.Items.Add(f.Name);
@@ -2011,37 +2148,37 @@ public class StyleForm : Form
         if (fi < 0) { fontBox.Items.Insert(0, s.Font); fi = 0; }
         fontBox.SelectedIndex = fi;
         fontBox.SelectedIndexChanged += delegate { s.Font = (string)fontBox.SelectedItem; Changed(); };
-        CheckBox bold = UI.Check(this, "Bold", 456, 103, s.Bold);
-        CheckBox italic = UI.Check(this, "Italic", 526, 103, s.Italic);
+        CheckBox bold = UI.Check(this, L.T("Bold"), 456, 103, s.Bold);
+        CheckBox italic = UI.Check(this, L.T("Italic"), 526, 103, s.Italic);
         bold.CheckedChanged += delegate { s.Bold = bold.Checked; Changed(); };
         italic.CheckedChanged += delegate { s.Italic = italic.Checked; Changed(); };
 
-        UI.FieldLabel(this, "Text color", 30, 142);
+        UI.FieldLabel(this, L.T("Text color"), 30, 142);
         UI.ColorButton(this, 190, 142, s.TextColor, delegate (Color col) { s.TextColor = col; Changed(); });
 
-        UI.FieldLabel(this, "Outline", 30, 184);
+        UI.FieldLabel(this, L.T("Outline"), 30, 184);
         UI.ColorButton(this, 190, 184, s.OutlineColor, delegate (Color col) { s.OutlineColor = col; Changed(); });
-        UI.Lbl(this, "Thickness", 342, 188, 80, 10f, UI.Muted, FontStyle.Regular);
+        UI.Lbl(this, L.T("Thickness"), 342, 188, 80, 10f, UI.Muted, FontStyle.Regular);
         NumericUpDown outline = UI.Number(this, 424, 184, 0, 20, s.OutlineWidth, 1);
         outline.Size = new Size(UI.D(70), UI.D(30));
         outline.ValueChanged += delegate { s.OutlineWidth = (int)outline.Value; Changed(); };
-        CheckBox shadow = UI.Check(this, "Drop shadow", 510, 187, s.Shadow);
+        CheckBox shadow = UI.Check(this, L.T("Drop shadow"), 510, 187, s.Shadow);
         shadow.CheckedChanged += delegate { s.Shadow = shadow.Checked; Changed(); };
 
         // animation
-        UI.FieldLabel(this, "Animation", 30, 236);
+        UI.FieldLabel(this, L.T("Animation"), 30, 236);
         ComboBox animBox = UI.Combo(this, 190, 236, 250);
-        animBox.Items.AddRange(Renderer.AnimNames);
+        animBox.Items.AddRange(L.All(Renderer.AnimNames));
         animBox.SelectedIndex = Math.Max(0, Array.IndexOf(Renderer.AnimKeys, s.Anim));
         animBox.SelectedIndexChanged += delegate { s.Anim = Renderer.AnimKeys[animBox.SelectedIndex]; Changed(); if (!loading) app.PreviewAnimation(c); };
 
-        UI.FieldLabel(this, "Duration (ms)", 30, 278);
+        UI.FieldLabel(this, L.T("Duration (ms)"), 30, 278);
         NumericUpDown dur = UI.Number(this, 190, 278, 100, 3000, s.AnimMs, 50);
         dur.ValueChanged += delegate { s.AnimMs = (int)dur.Value; Changed(); };
-        UI.Lbl(this, "Flash color", 342, 282, 90, 10f, UI.Muted, FontStyle.Regular);
+        UI.Lbl(this, L.T("Flash color"), 342, 282, 90, 10f, UI.Muted, FontStyle.Regular);
         UI.ColorButton(this, 434, 278, s.FlashColor, delegate (Color col) { s.FlashColor = col; Changed(); });
 
-        Button play = UI.Btn(this, "Preview animation", 30, 326, 190, 36, false);
+        Button play = UI.Btn(this, L.T("Preview animation"), 30, 326, 190, 36, false);
         play.Click += delegate { app.PreviewAnimation(c); };
 
         PreviewPanel pv = new PreviewPanel(app, c);
@@ -2049,17 +2186,17 @@ public class StyleForm : Form
         pv.Size = new Size(UI.D(600), UI.D(150));
         Controls.Add(pv);
 
-        Button all = UI.Btn(this, "Use this look for all counters", 30, 552, 270, 40, false);
+        Button all = UI.Btn(this, L.T("Use this look for all counters"), 30, 552, 270, 40, false);
         all.Visible = app.S.Counters.Count > 1;
         Label done = UI.Para(this, "", 310, 562, 180, 24);
         all.Click += delegate
         {
             foreach (Counter o in app.S.Counters) if (o != c) o.Style = c.Style.Clone();
             app.ApplySettings();
-            done.Text = "Copied to all counters.";
+            done.Text = L.T("Copied to all counters.");
             done.ForeColor = UI.Good;
         };
-        Button close = UI.Btn(this, "Done", 510, 552, 120, 40, true);
+        Button close = UI.Btn(this, L.T("Done"), 510, 552, 120, 40, true);
         close.Click += delegate { Close(); };
         AcceptButton = close;
         loading = false;
@@ -2119,15 +2256,16 @@ public partial class MainForm : Form
         Controls.Add(nav);
         navTop = BuildBrand();
 
-        // Menu order: what you track > how it gets on stream > app options
+        // Menu order: welcome + language > what you track > what happens on the LIVE > how it gets on stream > app options
         loading = true;
-        AddPage("Counters", BuildCountersPage());
-        AddPage("Actions", BuildActionsPage());
-        AddPage("TikTok LIVE", BuildTikTokPage());
-        AddPage("Overlay", BuildOverlayPage());
-        AddPage("Settings", BuildSettingsPage());
+        AddPage(L.T("General"), BuildGeneralPage());
+        AddPage(L.T("Counters"), BuildCountersPage());
+        AddPage(L.T("Actions"), BuildActionsPage());
+        AddPage(L.T("TikTok LIVE"), BuildTikTokPage());
+        AddPage(L.T("Overlay"), BuildOverlayPage());
+        AddPage(L.T("Settings"), BuildSettingsPage());
         loading = false;
-        SelectPage(0);
+        SelectPage(Math.Max(0, Math.Min(pages.Count - 1, app.S.LastPage)));   // opens where you left off
 
         app.CountChanged += OnCount;
         app.SettingsChanged += OnSettings;
@@ -2143,7 +2281,7 @@ public partial class MainForm : Form
         title.ForeColor = UI.Text;
         title.AutoSize = true;
         Label ver = new Label();
-        ver.Text = "Version " + Program.Version;
+        ver.Text = L.F("Version {0}", Program.Version);
         ver.Font = UI.F(8.5f, FontStyle.Regular);
         ver.ForeColor = UI.Muted;
         ver.AutoSize = true;
@@ -2204,6 +2342,11 @@ public partial class MainForm : Form
             navButtons[i].ForeColor = i == index ? UI.Text : UI.Muted;
             navButtons[i].Font = UI.F(10.5f, i == index ? FontStyle.Bold : FontStyle.Regular);
         }
+        if (app.S.LastPage != index && !loading)
+        {
+            app.S.LastPage = index;
+            app.S.Save(app.SettingsFile);
+        }
     }
 
     Panel NewPage(string title, string subtitle)
@@ -2223,9 +2366,8 @@ public partial class MainForm : Form
 
     Panel BuildCountersPage()
     {
-        Panel p = NewPage("Counters", "Track anything - deaths, wins, kills, attempts. Each counter has its own hotkeys and its own look, " +
-                                      "and every counter set to \"Show on stream\" appears in the same overlay.");
-        keyMessage = UI.Para(p, "Click a key button, then press the key you want (Backspace = no key, Esc = cancel).", 38, 116, 620, 24);
+        Panel p = NewPage(L.T("Counters"), L.T("Track anything - deaths, wins, kills, attempts. Each counter has its own hotkeys and its own look, and every counter set to \"Show on stream\" appears in the same overlay."));
+        keyMessage = UI.Para(p, L.T("Click a key button, then press the key you want (Backspace = no key, Esc = cancel)."), 38, 116, 620, 24);
         cardsHost = new Panel();
         cardsHost.BackColor = UI.Bg;
         cardsHost.Location = new Point(UI.D(38), UI.D(146));
@@ -2251,19 +2393,19 @@ public partial class MainForm : Form
         }
         if (app.S.Counters.Count < Settings.MaxCounters)
         {
-            Button add = UI.Btn(cardsHost, "+  Add counter", 0, 0, 200, 40, true);
+            Button add = UI.Btn(cardsHost, L.T("+  Add counter"), 0, 0, 200, 40, true);
             add.Location = new Point(0, y);
             add.Click += delegate
             {
                 Counter c = app.AddCounter();
                 RebuildCards();
-                if (c != null) Message("Added \"" + c.DisplayName + "\". Rename it, set its keys and its look.", UI.Good);
+                if (c != null) Message(L.F("Added \"{0}\". Rename it, set its keys and its look.", c.DisplayName), UI.Good);
             };
             y += add.Height + UI.D(20);
         }
         else
         {
-            Label max = UI.Para(cardsHost, "That's the maximum of " + Settings.MaxCounters + " counters.", 0, 0, 400, 24);
+            Label max = UI.Para(cardsHost, L.F("That's the maximum of {0} counters.", Settings.MaxCounters), 0, 0, 400, 24);
             max.Location = new Point(0, y);
             y += max.Height + UI.D(20);
         }
@@ -2290,12 +2432,12 @@ public partial class MainForm : Form
         card.Controls.Add(name);
 
         ComboBox icon = UI.Combo(card, 246, 16, 170);
-        icon.Items.AddRange(Renderer.IconNames);
+        icon.Items.AddRange(L.All(Renderer.IconNames));
         int ii = Array.IndexOf(Renderer.IconKeys, c.Icon);
         icon.SelectedIndex = ii >= 0 ? ii : Renderer.IconKeys.Length - 1;
         icon.SelectedIndexChanged += delegate { c.Icon = Renderer.IconKeys[icon.SelectedIndex]; Changed(); };
 
-        CheckBox show = UI.Check(card, "Show on stream", 432, 19, c.Visible);
+        CheckBox show = UI.Check(card, L.T("Show on stream"), 432, 19, c.Visible);
         show.BackColor = UI.Card;
         show.CheckedChanged += delegate { c.Visible = show.Checked; Changed(); };
 
@@ -2303,33 +2445,33 @@ public partial class MainForm : Form
         ui.CountLbl = UI.Lbl(card, c.Count.ToString(), 12, 52, 170, 24f, UI.Text, FontStyle.Bold);
         ui.CountLbl.Size = new Size(UI.D(170), UI.D(56));
         ui.CountLbl.TextAlign = ContentAlignment.MiddleLeft;
-        Button minus = UI.Btn(card, "-1", 190, 60, 56, 40, false);
-        Button plus = UI.Btn(card, "+1", 252, 60, 70, 40, true);
-        Button reset = UI.Btn(card, "Reset", 328, 60, 76, 40, false);
+        Button minus = UI.Btn(card, L.T("-1"), 190, 60, 56, 40, false);
+        Button plus = UI.Btn(card, L.T("+1"), 252, 60, 70, 40, true);
+        Button reset = UI.Btn(card, L.T("Reset"), 328, 60, 76, 40, false);
         minus.Click += delegate { app.Add(c, -1); };
         plus.Click += delegate { app.Add(c, 1); };
         reset.Click += delegate
         {
-            if (MessageBox.Show(this, "Reset \"" + c.DisplayName + "\" to 0?", "ClutchKit", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
+            if (MessageBox.Show(this, L.F("Reset \"{0}\" to 0?", c.DisplayName), "ClutchKit", MessageBoxButtons.YesNo, MessageBoxIcon.Question) == DialogResult.Yes)
                 app.Reset(c);
         };
         ui.SetBox = UI.Number(card, 420, 66, 0, 999999, c.Count, 1);
-        Button set = UI.Btn(card, "Set", 526, 64, 78, 32, false);
+        Button set = UI.Btn(card, L.T("Set"), 526, 64, 78, 32, false);
         set.Click += delegate { app.SetCount(c, (int)ui.SetBox.Value); };
 
         // row 3: hotkeys
         for (int i = 0; i < 3; i++)
         {
             int action = i;
-            UI.Lbl(card, Counter.ActionNames[i], 16 + i * 200, 126, 50, 10f, UI.Muted, FontStyle.Regular);
-            Button kb = UI.Btn(card, c.Keys[i].ToString(), 66 + i * 200, 118, 138, 36, false);
+            UI.Lbl(card, L.T(Counter.ActionNames[i]), 16 + i * 200, 126, 66, 10f, UI.Muted, FontStyle.Regular);
+            Button kb = UI.Btn(card, c.Keys[i].ToString(), 82 + i * 200, 118, 122, 36, false);
             kb.BackColor = UI.Input;
             kb.Click += delegate { StartCapture(c, action); };
             ui.KeyBtns[i] = kb;
         }
 
         // row 4: this counter's look, remove
-        Button look = UI.Btn(card, "Appearance...", 16, 168, 160, 36, false);
+        Button look = UI.Btn(card, L.T("Appearance..."), 16, 168, 160, 36, false);
         look.Click += delegate
         {
             CancelCapture();
@@ -2337,10 +2479,10 @@ public partial class MainForm : Form
         };
         if (app.S.Counters.Count > 1)
         {
-            Button remove = UI.Btn(card, "Remove", 516, 168, 88, 36, false);
+            Button remove = UI.Btn(card, L.T("Remove"), 516, 168, 88, 36, false);
             remove.Click += delegate
             {
-                if (MessageBox.Show(this, "Remove the counter \"" + c.DisplayName + "\" (count " + c.Count + ")?", "ClutchKit",
+                if (MessageBox.Show(this, L.F("Remove the counter \"{0}\" (count {1})?", c.DisplayName, c.Count), "ClutchKit",
                         MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
                 app.RemoveCounter(c);
                 RebuildCards();
@@ -2367,18 +2509,18 @@ public partial class MainForm : Form
             for (int i = 0; i < 3; i++)
             {
                 bool active = ui.C == capCounter && i == capAction;
-                ui.KeyBtns[i].Text = active ? "Press a key..." : ui.C.Keys[i].ToString();
+                ui.KeyBtns[i].Text = active ? L.T("Press a key...") : ui.C.Keys[i].ToString();
                 ui.KeyBtns[i].ForeColor = active ? UI.Warn : (ui.C.Keys[i].IsSet ? UI.Text : UI.Muted);
             }
     }
 
     void StartCapture(Counter c, int action)
     {
-        if (capCounter == c && capAction == action) { CancelCapture(); Message("Cancelled - nothing changed.", UI.Muted); return; }
+        if (capCounter == c && capAction == action) { CancelCapture(); Message(L.T("Cancelled - nothing changed."), UI.Muted); return; }
         capCounter = c;
         capAction = action;
         app.CapturingHotkey = true;   // so the key you press here doesn't also change a count
-        Message("Press the key for \"" + c.DisplayName + " " + Counter.ActionNames[action] + "\"  (Backspace = no key, Esc = cancel).", UI.Warn);
+        Message(L.F("Press the key for \"{0}\" (Backspace = no key, Esc = cancel).", c.DisplayName + " " + L.T(Counter.ActionNames[action])), UI.Warn);
         RefreshKeys();
         ActiveControl = null;
         Focus();
@@ -2413,15 +2555,15 @@ public partial class MainForm : Form
         if ((GetAsyncKeyState(0x5B) & 0x8000) != 0 || (GetAsyncKeyState(0x5C) & 0x8000) != 0) mods |= Hotkey.Win;
         Counter c = capCounter;
         int action = capAction;
-        string what = "\"" + c.DisplayName + " " + Counter.ActionNames[action] + "\"";
+        string what = "\"" + c.DisplayName + " " + L.T(Counter.ActionNames[action]) + "\"";
 
-        if (key == Keys.Escape && mods == 0) { CancelCapture(); Message("Cancelled - nothing changed.", UI.Muted); return true; }
+        if (key == Keys.Escape && mods == 0) { CancelCapture(); Message(L.T("Cancelled - nothing changed."), UI.Muted); return true; }
         if (key == Keys.Back && mods == 0)
         {
             c.Keys[action] = new Hotkey(0, 0);
             app.ApplySettings();
             CancelCapture();
-            Message(what + " has no key now.", UI.Muted);
+            Message(L.F("{0} has no key now.", what), UI.Muted);
             return true;
         }
 
@@ -2429,23 +2571,23 @@ public partial class MainForm : Form
         string owner = app.KeyOwner(hk, c, action);
         if (owner != null)
         {
-            Message(hk + " is already used for \"" + owner + "\". Press a different key.", UI.Warn);
+            Message(L.F("{0} is already used for \"{1}\". Press a different key.", hk, owner), UI.Warn);
             return true;
         }
         bool typingKey = mods == 0 && ((key >= Keys.A && key <= Keys.Z) || (key >= Keys.D0 && key <= Keys.D9) || key == Keys.Space ||
                                        key == Keys.Enter || key == Keys.Tab);
         if (typingKey &&
-            MessageBox.Show(this, hk + " will change the count every time you type it anywhere (chat, Discord, ...).\n\nUse it anyway?",
+            MessageBox.Show(this, L.F("{0} will change the count every time you type it anywhere (chat, Discord, ...).", hk) + "\n\n" + L.T("Use it anyway?"),
                 "ClutchKit", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
         {
             CancelCapture();
-            Message("Not changed. Try a key you don't type with, like a numpad or F key.", UI.Muted);
+            Message(L.T("Not changed. Try a key you don't type with, like a numpad or F key."), UI.Muted);
             return true;
         }
         c.Keys[action] = hk;
         app.ApplySettings();
         CancelCapture();
-        Message("Saved! " + hk + " now does " + what + ".", UI.Good);
+        Message(L.F("Saved! {0} now does {1}.", hk, what), UI.Good);
         return true;
     }
 
@@ -2453,52 +2595,50 @@ public partial class MainForm : Form
     {
         base.OnDeactivate(e);
         if (keyCapBtn != null && !ContainsFocus) CancelKeyCapture();
-        if (capAction >= 0 && !ContainsFocus) { CancelCapture(); Message("Cancelled (you clicked away) - nothing changed.", UI.Muted); }
+        if (capAction >= 0 && !ContainsFocus) { CancelCapture(); Message(L.T("Cancelled (you clicked away) - nothing changed."), UI.Muted); }
     }
 
     // ---------------- Overlay ----------------
 
     Panel BuildOverlayPage()
     {
-        Panel p = NewPage("Overlay", "How your counters get into LIVE Studio. Pick one of the two ways.");
+        Panel p = NewPage(L.T("Overlay"), L.T("How your counters get into LIVE Studio. Pick one of the two ways."));
         Settings s = app.S;
 
         linkRadio = new RadioButton();
-        linkRadio.Text = "Link overlay (recommended)";
+        linkRadio.Text = L.T("Link overlay (recommended)");
         linkRadio.Font = UI.F(11f, FontStyle.Bold);
         linkRadio.ForeColor = UI.Text;
         linkRadio.Location = new Point(UI.D(38), UI.D(122));
         linkRadio.AutoSize = true;
         linkRadio.Checked = s.Mode != "window";
         p.Controls.Add(linkRadio);
-        UI.Para(p, "See-through text on stream. In LIVE Studio: Add source > Link > paste the link once. " +
-                   "It works no matter if LIVE Studio or ClutchKit starts first, and everything you change here updates on stream automatically.",
+        UI.Para(p, L.T("See-through text on stream. In LIVE Studio: Add source > Link > paste the link once. It works no matter if LIVE Studio or ClutchKit starts first, and everything you change here updates on stream automatically."),
                    60, 152, 600, 62);
-        Button copy = UI.Btn(p, "Copy LIVE Studio link", 60, 218, 220, 38, true);
+        Button copy = UI.Btn(p, L.T("Copy LIVE Studio link"), 60, 218, 220, 38, true);
         Label linkStatus = UI.Para(p, "", 292, 227, 360, 24);
-        copy.Click += delegate { app.CopyLink(); linkStatus.Text = "Copied! Paste it in LIVE Studio with Ctrl+V."; linkStatus.ForeColor = UI.Good; };
+        copy.Click += delegate { app.CopyLink(); linkStatus.Text = L.T("Copied! Paste it in LIVE Studio with Ctrl+V."); linkStatus.ForeColor = UI.Good; };
 
         windowRadio = new RadioButton();
-        windowRadio.Text = "Capture window";
+        windowRadio.Text = L.T("Capture window");
         windowRadio.Font = UI.F(11f, FontStyle.Bold);
         windowRadio.ForeColor = UI.Text;
         windowRadio.Location = new Point(UI.D(38), UI.D(282));
         windowRadio.AutoSize = true;
         windowRadio.Checked = s.Mode == "window";
         p.Controls.Add(windowRadio);
-        UI.Para(p, "Opens a small window showing the counters. In LIVE Studio: Add source > Window capture > pick \"ClutchKit - Overlay\". " +
-                   "Keep that window open (it can be behind your game, but not minimized).",
+        UI.Para(p, L.T("Opens a small window showing the counters. In LIVE Studio: Add source > Window capture > pick \"ClutchKit - Overlay\". Keep that window open (it can be behind your game, but not minimized)."),
                    60, 312, 600, 62);
-        UI.Lbl(p, "Background", 60, 384, 120, 10f, UI.Muted, FontStyle.Regular);
+        UI.Lbl(p, L.T("Background"), 60, 384, 120, 10f, UI.Muted, FontStyle.Regular);
         Button bgColorBtn = UI.ColorButton(p, 180, 380, s.WindowBg, delegate (Color c) { s.WindowBg = c; Changed(); });
-        Button black = UI.Btn(p, "Black", 330, 380, 80, 32, false);
-        Button green = UI.Btn(p, "Green screen", 418, 380, 130, 32, false);
+        Button black = UI.Btn(p, L.T("Black"), 330, 380, 80, 32, false);
+        Button green = UI.Btn(p, L.T("Green screen"), 418, 380, 130, 32, false);
         black.Click += delegate { s.WindowBg = Color.Black; UI.PaintSwatch(bgColorBtn, s.WindowBg); Changed(); };
         green.Click += delegate { s.WindowBg = Color.FromArgb(0, 255, 0); UI.PaintSwatch(bgColorBtn, s.WindowBg); Changed(); };
-        Button showWin = UI.Btn(p, "Show capture window", 60, 424, 220, 38, false);
+        Button showWin = UI.Btn(p, L.T("Show capture window"), 60, 424, 220, 38, false);
         showWin.Click += delegate { windowRadio.Checked = true; app.ShowCapture(); };
 
-        UI.Lbl(p, "Preview of your overlay", 38, 486, 300, 10f, UI.Muted, FontStyle.Regular);
+        UI.Lbl(p, L.T("Preview of your overlay"), 38, 486, 300, 10f, UI.Muted, FontStyle.Regular);
         PreviewPanel pv = new PreviewPanel(app, null);
         pv.Location = new Point(UI.D(38), UI.D(512));
         pv.Size = new Size(UI.D(620), UI.D(130));
@@ -2513,27 +2653,26 @@ public partial class MainForm : Form
 
     Panel BuildSettingsPage()
     {
-        Panel p = NewPage("Settings", "App options.");
-        CheckBox trayBox = UI.Check(p, "Start in the tray (don't open this window when ClutchKit starts)", 38, 126, app.S.StartInTray);
+        Panel p = NewPage(L.T("Settings"), L.T("App options."));
+        CheckBox trayBox = UI.Check(p, L.T("Start in the tray (don't open this window when ClutchKit starts)"), 38, 126, app.S.StartInTray);
         trayBox.CheckedChanged += delegate { app.S.StartInTray = trayBox.Checked; Changed(); };
-        UI.Para(p, "Closing this window keeps ClutchKit running by the clock. Double-click the red icon to come back, " +
-                   "right-click it to exit.", 38, 166, 620, 44);
-        Button folder = UI.Btn(p, "Open ClutchKit folder", 38, 224, 240, 38, false);
+        UI.Para(p, L.T("Closing this window keeps ClutchKit running by the clock. Double-click the red icon to come back, right-click it to exit."), 38, 166, 620, 44);
+        Button folder = UI.Btn(p, L.T("Open ClutchKit folder"), 38, 224, 240, 38, false);
         folder.Click += delegate { app.OpenFolder(); };
-        UI.Para(p, "counts.txt holds the counts and settings.ini holds these settings.", 290, 233, 380, 24);
-        Button exit = UI.Btn(p, "Exit ClutchKit", 38, 286, 240, 38, false);
+        UI.Para(p, L.T("counts.txt holds the counts and settings.ini holds these settings."), 290, 233, 380, 24);
+        Button exit = UI.Btn(p, L.T("Exit ClutchKit"), 38, 286, 240, 38, false);
         exit.Click += delegate { app.ExitApp(); };
         if (Installer.IsInstalledCopy(Application.ExecutablePath))
         {
-            Button uninstall = UI.Btn(p, "Uninstall ClutchKit...", 290, 286, 240, 38, false);
+            Button uninstall = UI.Btn(p, L.T("Uninstall ClutchKit..."), 290, 286, 240, 38, false);
             uninstall.Click += delegate
             {
                 try { Process.Start(Installer.InstalledExe, "/uninstall"); } catch { return; }
                 app.ExitApp();
             };
         }
-        UI.Para(p, "ClutchKit " + Program.Version + "   \u00b7   Overlay port: " + app.S.Port +
-                   (app.ServerError != null ? "  (in use by another program - the overlay can't connect)" : ""), 38, 348, 620, 24);
+        UI.Para(p, "ClutchKit " + Program.Version + "   \u00b7   " + L.F("Overlay port: {0}", app.S.Port) +
+                   (app.ServerError != null ? "  " + L.T("(in use by another program - the overlay can't connect)") : ""), 38, 348, 620, 24);
         return p;
     }
 

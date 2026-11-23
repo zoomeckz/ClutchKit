@@ -35,7 +35,7 @@ public class TikTokLive
     public string User { get; private set; }
     public event EventHandler StatusChanged;   // raised on the UI thread
 
-    public TikTokLive(App app) { this.app = app; Detail = "Not connected."; }
+    public TikTokLive(App app) { this.app = app; Detail = L.T("Not connected."); }
 
     public bool Running { get { return Current != State.Off && Current != State.Error; } }
 
@@ -51,8 +51,8 @@ public class TikTokLive
         Stop();
         user = CleanUser(user);
         apiKey = (apiKey ?? "").Trim();
-        if (user.Length == 0) { SetStatus(State.Error, "Enter your TikTok username first."); return; }
-        if (apiKey.Length == 0) { SetStatus(State.Error, "Enter your Euler Stream API key first (it's free - see the link)."); return; }
+        if (user.Length == 0) { SetStatus(State.Error, L.T("Enter your TikTok username first.")); return; }
+        if (apiKey.Length == 0) { SetStatus(State.Error, L.T("Enter your Euler Stream API key first (it's free - see the link).")); return; }
         lock (gate)
         {
             User = user;
@@ -76,7 +76,7 @@ public class TikTokLive
             try { if (cts != null) cts.Cancel(); } catch { }
             try { if (ws != null) ws.Abort(); } catch { }
         }
-        SetStatus(State.Off, "Not connected.");
+        SetStatus(State.Off, L.T("Not connected."));
     }
 
     // Status from the connection thread: ignored once that connection was stopped or replaced.
@@ -99,7 +99,7 @@ public class TikTokLive
         int backoff = 5;
         while (!stop.WaitOne(0))
         {
-            Report(State.Connecting, "Connecting to @" + user + "...");
+            Report(State.Connecting, L.F("Connecting to @{0}...", user));
             int code = -1;
             string reason = "";
             bool gotData = false;
@@ -120,19 +120,19 @@ public class TikTokLive
             switch (code)
             {
                 case 4401:
-                    Fail("Euler Stream says the API key isn't valid. Copy it again from your Euler Stream account.", stop); return;
+                    Fail(L.T("Euler Stream says the API key isn't valid. Copy it again from your Euler Stream account."), stop); return;
                 case 4400:
-                    Fail("Euler Stream didn't accept the username \"" + user + "\". Check the spelling (no @ needed).", stop); return;
+                    Fail(L.F("Euler Stream didn't accept the username \"{0}\". Check the spelling (no @ needed).", user), stop); return;
                 case 4403:
-                    Fail("Euler Stream says this key isn't allowed to read @" + user + "'s LIVE.", stop); return;
+                    Fail(L.F("Euler Stream says this key isn't allowed to read @{0}'s LIVE.", user), stop); return;
                 case 4404:
                 case 4005:
                     wait = 30;
-                    Report(State.Waiting, "@" + user + " isn't live right now. Checking again every " + wait + " s - start your LIVE and it connects by itself.");
+                    Report(State.Waiting, L.F("@{0} isn't live right now. Checking again every {1} s - start your LIVE and it connects by itself.", user, wait));
                     break;
                 case 4429:
                     wait = 60;
-                    Report(State.Waiting, "Too many connections on this Euler Stream key right now. Trying again in " + wait + " s.");
+                    Report(State.Waiting, L.F("Too many connections on this Euler Stream key right now. Trying again in {0} s.", wait));
                     break;
                 case 4555:
                     wait = 1;   // Euler Stream ends connections after 8 hours; just reconnect
@@ -140,7 +140,7 @@ public class TikTokLive
                 default:
                     wait = backoff;
                     backoff = Math.Min(60, backoff * 2);
-                    Report(State.Waiting, "Connection lost" + (reason.Length > 0 ? " (" + reason + ")" : "") + ". Reconnecting in " + wait + " s...");
+                    Report(State.Waiting, L.T("Connection lost") + (reason.Length > 0 ? " (" + reason + ")" : "") + ". " + L.F("Reconnecting in {0} s...", wait));
                     break;
             }
             if (stop.WaitOne(wait * 1000)) return;
@@ -172,7 +172,7 @@ public class TikTokLive
         {
             string url = ServiceUrl + "?uniqueId=" + Uri.EscapeDataString(user) + "&apiKey=" + Uri.EscapeDataString(apiKey);
             socket.ConnectAsync(new Uri(url), source.Token).Wait();
-            Report(State.Connecting, "Reached Euler Stream, waiting for @" + user + "'s LIVE...");
+            Report(State.Connecting, L.F("Reached Euler Stream, waiting for @{0}'s LIVE...", user));
 
             byte[] buffer = new byte[64 * 1024];
             MemoryStream message = new MemoryStream();
@@ -195,8 +195,8 @@ public class TikTokLive
                 {
                     // the first message means TikTok is really connected (not live = closed right away instead)
                     gotData = true;
-                    Report(State.Connected, "Connected - listening to @" + user + "'s LIVE.");
-                    app.Log("TikTok LIVE: connected to @" + user + ".");
+                    Report(State.Connected, L.F("Connected - listening to @{0}'s LIVE.", user));
+                    app.Log("TikTok LIVE: " + L.F("connected to @{0}.", user));
                 }
                 Handle(data);
             }
@@ -230,7 +230,7 @@ public class TikTokLive
             if (!warnedFormat)
             {
                 warnedFormat = true;
-                app.Log("TikTok LIVE: got data in a format ClutchKit doesn't read (" + data.Length + " bytes). Gifts may not arrive - please report this.");
+                app.Log("TikTok LIVE: " + L.F("got data in a format ClutchKit doesn't read ({0} bytes). Gifts may not arrive - please report this.", data.Length));
             }
             return;
         }
@@ -292,16 +292,16 @@ public class TikTokLive
                 break;
             case "room.status":
                 string state = Str(data, "state");
-                if (state == "connected") Report(State.Connected, "Connected - listening to @" + User + "'s LIVE.");
-                else if (state == "offline" || state == "ended") Report(State.Waiting, "@" + User + "'s LIVE is " + state + ".");
-                else if (state == "reconnecting") Report(State.Connecting, "Euler Stream is reconnecting to TikTok...");
+                if (state == "connected") Report(State.Connected, L.F("Connected - listening to @{0}'s LIVE.", User));
+                else if (state == "offline" || state == "ended") Report(State.Waiting, L.F("@{0}'s LIVE has ended or is offline.", User));
+                else if (state == "reconnecting") Report(State.Connecting, L.T("Euler Stream is reconnecting to TikTok..."));
                 else if (state == "error" && Str(data, "message").Length > 0) app.Log("TikTok LIVE: " + Str(data, "message"));
                 break;
             case "WebcastControlMessage":
-                if (Num(data, "action") == 3) { app.Log("TikTok LIVE: the LIVE ended."); Report(State.Waiting, "@" + User + "'s LIVE ended."); }
+                if (Num(data, "action") == 3) { app.Log("TikTok LIVE: " + L.T("the LIVE ended.")); Report(State.Waiting, L.F("@{0}'s LIVE has ended or is offline.", User)); }
                 break;
             case "decodeError":
-                app.Log("TikTok LIVE: Euler Stream couldn't read a message (" + Str(data, "message") + ").");
+                app.Log("TikTok LIVE: " + L.F("Euler Stream couldn't read a message ({0}).", Str(data, "message")));
                 break;
         }
     }

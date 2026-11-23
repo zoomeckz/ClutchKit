@@ -24,8 +24,16 @@ or press keys in your game.
 - Safety: only send keys while your game is in front, an on/off hotkey, a queue limit
 - Warns when the game runs as administrator (Windows then blocks the keys) and offers to restart as administrator
 - Test buttons and fake events, so you can set everything up offline
+- Stays tidy with lots of actions: sort them into topics (e.g. one per game) that fold up and can be switched
+  on/off as a whole, fold each action to one line, search, and duplicate actions
 - LIVE events are read through [Euler Stream](https://www.eulerstream.com) (free account and API key), because
   TikTok has no official API for LIVE events
+
+**Languages**
+- English, Español, Português (Brasil), Bahasa Indonesia, Türkçe, Deutsch, Français and Tiếng Việt
+- Starts in your Windows language; change it any time on the General page
+- Translations live in [src/Translations.cs](src/Translations.cs) (one row per text). Corrections are welcome;
+  run `tools\check-translations.ps1` to check that nothing is missing
 
 ## Install
 

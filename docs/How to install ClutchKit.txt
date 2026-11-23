@@ -1,4 +1,4 @@
-ClutchKit 3.1 - stream toolkit for TikTok LIVE Studio
+ClutchKit 3.2 - stream toolkit for TikTok LIVE Studio
 ======================================================
 Counters for anything you want to track (deaths, wins, kills, attempts...), each with
 its own hotkeys, shown live on stream with your own font, colors and animations.
@@ -51,6 +51,9 @@ The keys keep working while you're in a game, and your game still gets the key p
 Closing the window keeps ClutchKit running by the clock (red icon with three lines).
 Double-click the icon to open it again, right-click it to exit.
 
+LANGUAGE: ClutchKit starts in your Windows language (English, Español, Português,
+Bahasa Indonesia, Türkçe, Deutsch, Français, Tiếng Việt). Change it on the "General" page.
+
 
 ACTIONS (SOUND ALERTS, KEYS IN YOUR GAME)
 -----------------------------------------
@@ -60,7 +63,7 @@ ACTIONS (SOUND ALERTS, KEYS IN YOUR GAME)
 2. On the "TikTok LIVE" page, type your TikTok username, paste the key and
    click "Connect". Tick "Connect automatically" so you never have to do it again.
    If you aren't live yet, ClutchKit waits and connects when you go live.
-3. On the "Actions" page click "+ Add action". First pick what triggers it:
+3. On the "Actions" page, click "+ Add" on a topic bar. First pick what triggers it:
      Gift          the gift's name, e.g. Rose (several: Rose, GG). Empty = any gift.
                    min. coins: only gifts worth at least this much (e.g. 100 for big gifts).
      Follow, Share, Viewer joins
@@ -78,6 +81,15 @@ ACTIONS (SOUND ALERTS, KEYS IN YOUR GAME)
      Every gift in a combo: a x10 Rose combo presses the key 10 times
                    (untick: once per combo; sounds always play once per combo).
 4. Use "Test" (or "Test with a fake event"), click into your game and watch.
+
+Keeping lots of actions tidy:
+- Topics are boxes for your actions, e.g. one per game ("Minecraft", "Sounds").
+  "+ New topic" makes one; each topic can be folded up, renamed, deleted, or
+  switched off as a whole (its actions then don't run).
+- Each action folds to one line - click the arrow or its name to open it.
+  "Open all" / "Close all" fold everything at once.
+- Search finds actions by gift, sound, text or topic name.
+- "Duplicate" copies an action right below the original; "Topic" moves it.
 
 Sound alerts play through your PC's speakers/headset, like any other sound.
 In LIVE Studio, make sure your desktop/system audio is turned on so viewers hear them.

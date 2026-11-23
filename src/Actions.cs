@@ -31,7 +31,36 @@ public class LiveEvent
     public bool Streakable;      // combo gift: TikTok sends updates while the combo runs, then a last one
     public bool Test;
 
-    public string Who { get { return User.Length > 0 ? "@" + User : (Nick.Length > 0 ? Nick : "someone"); } }
+    public string Who { get { return User.Length > 0 ? "@" + User : (Nick.Length > 0 ? Nick : L.T("someone")); } }
+}
+
+// A topic: a named, collapsible box of actions (e.g. "Minecraft", "Sounds") that can be switched on/off as a whole.
+public class RuleGroup
+{
+    public int Id;
+    public string Name = "";
+    public bool Enabled = true;
+    public bool Collapsed = false;
+
+    public static RuleGroup Read(Dictionary<string, string> kv, int id)
+    {
+        RuleGroup g = new RuleGroup();
+        g.Id = id;
+        string pre = "group." + id + ".", v;
+        if (kv.TryGetValue(pre + "name", out v)) g.Name = v.Trim();
+        if (kv.TryGetValue(pre + "on", out v)) g.Enabled = Settings.ParseBool(v, true);
+        if (kv.TryGetValue(pre + "collapsed", out v)) g.Collapsed = Settings.ParseBool(v, false);
+        if (g.Name.Length == 0) g.Name = L.F("Topic {0}", id);
+        return g;
+    }
+
+    public void Write(StringBuilder b)
+    {
+        string pre = "group." + Id + ".";
+        b.AppendLine(pre + "name=" + Name.Replace("\r", "").Replace("\n", " "));
+        b.AppendLine(pre + "on=" + Enabled);
+        b.AppendLine(pre + "collapsed=" + Collapsed);
+    }
 }
 
 // One rule: when <trigger> happens, do <kind> (press a key / type text / play a sound).
@@ -39,12 +68,14 @@ public class GiftRule
 {
     public const string KindKey = "key", KindText = "text", KindSound = "sound";
     public static readonly string[] Kinds = { KindKey, KindText, KindSound };
-    public static readonly string[] KindNames = { "Press a key", "Type text", "Play a sound" };
+    public static readonly string[] KindNames = { L.N("Press a key"), L.N("Type text"), L.N("Play a sound") };
     public static readonly string[] Triggers = { LiveEvent.Gift, LiveEvent.Follow, LiveEvent.Share, LiveEvent.Join, LiveEvent.Likes };
-    public static readonly string[] TriggerNames = { "Gift", "Follow", "Share", "Viewer joins", "Likes" };
+    public static readonly string[] TriggerNames = { L.N("Gift"), L.N("Follow"), L.N("Share"), L.N("Viewer joins"), L.N("Likes") };
 
     public int Id;
+    public int GroupId;
     public bool Enabled = true;
+    public bool Collapsed = false;     // shown as one line in the list
     public string Trigger = LiveEvent.Gift;
     public string Gifts = "Rose";      // gift names, comma separated; empty = any gift
     public int MinCoins = 0;           // only gifts worth at least this many coins each
@@ -85,40 +116,48 @@ public class GiftRule
         }
     }
 
+    // What triggers it, in the user's language ("Rose (100+ coins)", "Follow", "Every 1000 likes").
     public string TriggerText
     {
         get
         {
             switch (Trigger)
             {
-                case LiveEvent.Follow: return "follow";
-                case LiveEvent.Share: return "share";
-                case LiveEvent.Join: return "viewer joins";
-                case LiveEvent.Likes: return "every " + EveryLikes + " likes";
+                case LiveEvent.Follow: return L.T("Follow");
+                case LiveEvent.Share: return L.T("Share");
+                case LiveEvent.Join: return L.T("Viewer joins");
+                case LiveEvent.Likes: return L.F("Every {0} likes", EveryLikes);
             }
-            string t = AnyGift ? "any gift" : Gifts.Trim();
-            if (MinCoins > 0) t += " (" + MinCoins + "+ coins)";
+            string t = AnyGift ? L.T("Any gift") : Gifts.Trim();
+            if (MinCoins > 0) t += " (" + L.F("{0}+ coins", MinCoins) + ")";
             return t;
         }
     }
 
+    // What it does, in the user's language.
     public string ActionText
     {
         get
         {
             string times = Times > 1 ? " x" + Times : "";
-            if (Kind == KindSound) return "play " + (SoundFile.Length > 0 ? Path.GetFileName(SoundFile) : "a sound") + times;
+            if (Kind == KindSound) return L.F("play {0}", SoundFile.Length > 0 ? Path.GetFileName(SoundFile) : L.T("(no sound picked)")) + times;
             if (Kind == KindText)
-                return (Key.IsSet ? Key + ", then type \"" : "type \"") + Text + "\"" + (Enter ? " + Enter" : "") + times;
-            return "press " + Key + times;
+                return (Key.IsSet ? L.F("{0}, then type \"{1}\"", Key, Text) : L.F("type \"{0}\"", Text)) + (Enter ? " + Enter" : "") + times;
+            return L.F("press {0}", Key) + times;
         }
     }
+
+    // One line for the collapsed view and the search: "Rose  ->  play rose.mp3"
+    public string Summary { get { return TriggerText + "  →  " + ActionText; } }
 
     public static GiftRule Read(Dictionary<string, string> kv, int id)
     {
         GiftRule r = new GiftRule();
         r.Id = id;
+        r.Collapsed = true;   // saved actions start folded up, so long lists stay tidy
         string pre = "rule." + id + ".", v;
+        if (kv.TryGetValue(pre + "group", out v)) r.GroupId = Settings.ParseInt(v, 0, 0, int.MaxValue);
+        if (kv.TryGetValue(pre + "collapsed", out v)) r.Collapsed = Settings.ParseBool(v, true);
         if (kv.TryGetValue(pre + "on", out v)) r.Enabled = Settings.ParseBool(v, true);
         if (kv.TryGetValue(pre + "trigger", out v) && Array.IndexOf(Triggers, v.Trim()) >= 0) r.Trigger = v.Trim();
         if (kv.TryGetValue(pre + "gifts", out v)) r.Gifts = v.Trim();
@@ -140,6 +179,8 @@ public class GiftRule
     public void Write(StringBuilder b)
     {
         string pre = "rule." + Id + ".";
+        b.AppendLine(pre + "group=" + GroupId);
+        b.AppendLine(pre + "collapsed=" + Collapsed);
         b.AppendLine(pre + "on=" + Enabled);
         b.AppendLine(pre + "trigger=" + Trigger);
         b.AppendLine(pre + "gifts=" + Gifts.Replace("\r", "").Replace("\n", " "));
@@ -356,8 +397,8 @@ public static class SoundPlayer
     // Plays the file and returns when it has finished (or stop() says to stop). null = OK, else what went wrong.
     public static string Play(string path, int volume, Func<bool> stop)
     {
-        if (string.IsNullOrEmpty(path) || !File.Exists(path)) return "the sound file isn't there anymore (" + path + ")";
-        if (path.IndexOf('"') >= 0) return "the file name can't contain quotes";
+        if (string.IsNullOrEmpty(path) || !File.Exists(path)) return L.F("the sound file isn't there anymore ({0})", path);
+        if (path.IndexOf('"') >= 0) return L.T("the file name can't contain quotes");
         string alias = "ck" + Interlocked.Increment(ref counter);
         int err = Send("open \"" + path + "\" type mpegvideo alias " + alias, null);
         if (err != 0) return Error(err);
@@ -484,18 +525,18 @@ public class GiftEngine
         int added = NewGifts(g, out first);
         if (added == 0 && !first) return;   // the closing message of a combo we already counted
 
-        string what = g.Who + " sent " + (g.GiftName.Length > 0 ? g.GiftName : "a gift") + (added > 1 ? " x" + added : "") +
-                      (g.Coins > 0 ? " (" + g.Coins * Math.Max(1, added) + " coins)" : "") + (g.Test ? " [test]" : "");
-        if (!app.S.ActionsOn) { app.Log(what + " - actions are paused"); return; }
+        string what = L.F("{0} sent {1}", g.Who, g.GiftName.Length > 0 ? g.GiftName : L.T("a gift")) + (added > 1 ? " x" + added : "") +
+                      (g.Coins > 0 ? " (" + L.F("{0} coins", g.Coins * Math.Max(1, added)) + ")" : "") + (g.Test ? " [" + L.T("test") + "]" : "");
+        if (!app.S.ActionsOn) { app.Log(what + " - " + L.T("actions are paused")); return; }
         string result = RunRules(g, delegate (GiftRule r) { return r.PerGift && r.Kind != GiftRule.KindSound ? added : (first ? 1 : 0); });
-        app.Log(what + " - " + (result ?? "no action for it"));
+        app.Log(what + " - " + (result ?? L.T("no action for it")));
     }
 
     void OnSimple(LiveEvent e)
     {
-        string what = e.Who + (e.Type == LiveEvent.Follow ? " followed you" : e.Type == LiveEvent.Share ? " shared your LIVE" : " joined") +
-                      (e.Test ? " [test]" : "");
-        if (!app.S.ActionsOn) { if (e.Type != LiveEvent.Join) app.Log(what + " - actions are paused"); return; }
+        string what = (e.Type == LiveEvent.Follow ? L.F("{0} followed you", e.Who) : e.Type == LiveEvent.Share ? L.F("{0} shared your LIVE", e.Who) : L.F("{0} joined", e.Who)) +
+                      (e.Test ? " [" + L.T("test") + "]" : "");
+        if (!app.S.ActionsOn) { if (e.Type != LiveEvent.Join) app.Log(what + " - " + L.T("actions are paused")); return; }
         string result = RunRules(e, delegate (GiftRule r) { return 1; });
         if (result != null) app.Log(what + " - " + result);
         else if (e.Type != LiveEvent.Join) app.Log(what);   // joins are too many to log one by one
@@ -512,7 +553,7 @@ public class GiftEngine
             long every = Math.Max(1, r.EveryLikes);
             return (int)Math.Min(100, now / every - before / every);
         });
-        if (result != null) app.Log(now + " likes" + (e.Test ? " [test]" : "") + " - " + result);
+        if (result != null) app.Log(L.F("{0} likes", now) + (e.Test ? " [" + L.T("test") + "]" : "") + " - " + result);
     }
 
     // Queues every matching rule runsFor(rule) times (cooldowns applied). Returns a log text, or null if nothing ran.
@@ -522,7 +563,7 @@ public class GiftEngine
         DateTime now = DateTime.UtcNow;
         foreach (GiftRule r in app.S.Rules)
         {
-            if (!r.Matches(e) || !r.CanRun) continue;
+            if (!r.Matches(e) || !r.CanRun || !app.S.GroupOn(r.GroupId)) continue;
             int runs = runsFor(r);
             if (runs <= 0) continue;
             DateTime last;
@@ -538,8 +579,8 @@ public class GiftEngine
             }
         }
         if (queued == 0 && dropped == 0)
-            return cooling > 0 && e.Type != LiveEvent.Join ? "waiting for cooldown" : null;
-        return queued + " action" + (queued == 1 ? "" : "s") + " queued" + (dropped > 0 ? ", " + dropped + " skipped (queue full)" : "");
+            return cooling > 0 && e.Type != LiveEvent.Join ? L.T("waiting for cooldown") : null;
+        return (queued == 1 ? L.T("1 action queued") : L.F("{0} actions queued", queued)) + (dropped > 0 ? ", " + L.F("{0} skipped (queue full)", dropped) : "");
     }
 
     // Test button on a rule: runs it once, whether or not actions are paused or cooling down.
@@ -548,7 +589,7 @@ public class GiftEngine
         LiveEvent e = new LiveEvent();
         e.Test = true;
         e.Type = r.Trigger;
-        e.GiftName = r.Trigger == LiveEvent.Gift ? (r.AnyGift ? "test gift" : r.Gifts.Split(',')[0].Trim()) : "";
+        e.GiftName = r.Trigger == LiveEvent.Gift ? (r.AnyGift ? L.T("test gift") : r.Gifts.Split(',')[0].Trim()) : "";
         Enqueue(r, e);
     }
 
@@ -592,12 +633,12 @@ public class GiftEngine
                 {
                     if (lane == sounds) RunSound(j); else RunKeys(j);
                 }
-                catch (Exception ex) { app.Log("Action failed: " + ex.Message); }
+                catch (Exception ex) { app.Log(L.F("Action failed: {0}", ex.Message)); }
             }
         }
     }
 
-    string Source(Job j) { return j.Rule.TriggerText + (j.Event.Test ? ", test" : " from " + j.Event.Who); }
+    string Source(Job j) { return j.Event.Test ? j.Rule.TriggerText + ", " + L.T("test") : L.F("{0} from {1}", j.Rule.TriggerText, j.Event.Who); }
 
     void RunSound(Job j)
     {
@@ -606,9 +647,9 @@ public class GiftEngine
         for (int i = 0; i < r.Times && !stopSound; i++)
         {
             string error = SoundPlayer.Play(r.SoundFile, r.Volume, delegate { return stopSound; });
-            if (error != null) { app.Log("Couldn't play " + Path.GetFileName(r.SoundFile) + ": " + error); return; }
+            if (error != null) { app.Log(L.F("Couldn't play {0}: {1}", Path.GetFileName(r.SoundFile), error)); return; }
         }
-        app.Log((stopSound ? "Stopped: " : "Played: ") + Path.GetFileName(r.SoundFile) + " (" + Source(j) + ")");
+        app.Log((stopSound ? L.F("Stopped: {0}", Path.GetFileName(r.SoundFile)) : L.F("Played: {0}", Path.GetFileName(r.SoundFile))) + " (" + Source(j) + ")");
     }
 
     void RunKeys(Job j)
@@ -620,15 +661,14 @@ public class GiftEngine
         string only = KeySender.CleanProcessName(app.S.OnlyProcess);
         if (only.Length > 0 && !string.Equals(front, only, StringComparison.OrdinalIgnoreCase))
         {
-            app.Log("Skipped \"" + r.ActionText + "\": " + only + " isn't in front" + (front.Length > 0 ? " (" + front + " is)" : ""));
+            app.Log(L.F("Skipped \"{0}\": {1} isn't in front", r.ActionText, only) + (front.Length > 0 ? " (" + L.F("{0} is", front) + ")" : ""));
             Thread.Sleep(20);
             return;
         }
         if (elevated == 1 && !KeySender.SelfElevated && front != warnedProcess)
         {
             warnedProcess = front;
-            app.Log("Warning: " + front + " runs as administrator, so Windows may block ClutchKit's keys. " +
-                    "Fix: Actions > Restart as administrator.");
+            app.Log(L.F("Warning: {0} runs as administrator, so Windows may block ClutchKit's keys. Fix: Actions > Restart as administrator.", front));
             app.Ui(delegate { if (ElevationProblem != null) ElevationProblem(front); });
         }
 
@@ -651,6 +691,6 @@ public class GiftEngine
                 Thread.Sleep(gap);
             }
         }
-        app.Log((ok ? "Did: " : "Windows blocked: ") + r.ActionText + " (" + Source(j) + ")" + (front.Length > 0 ? " -> " + front : ""));
+        app.Log((ok ? L.F("Did: {0}", r.ActionText) : L.F("Windows blocked: {0}", r.ActionText)) + " (" + Source(j) + ")" + (front.Length > 0 ? " -> " + front : ""));
     }
 }

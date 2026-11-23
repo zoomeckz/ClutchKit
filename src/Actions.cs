@@ -1,8 +1,9 @@
-// ClutchKit - actions: when something happens on your LIVE (a gift, follow, share, join or likes),
-// play a sound, press keys in your game or type text (e.g. a command).
+// ClutchKit - actions: when something happens on your LIVE (a gift, follow, share, join, likes or a
+// chat command like !boom), play a sound, press keys in your game, type text or change a counter.
 // ----------------------------------------------------------------------------------
 // LiveEvent   - one thing that happened on the LIVE (or a test event)
 // GiftRule    - one "when this happens, do this" rule (saved in settings.ini as rule.<id>.*)
+// Profile     - a saved set of topics that are on (e.g. one per game)
 // KeySender   - presses keys / types text with SendInput, the way a real keyboard does (scan codes)
 // SoundPlayer - plays MP3/WAV files with Windows' own media player engine (MCI), with volume
 // GiftEngine  - matches events to rules (incl. gift combos, like milestones, cooldowns) and runs them
@@ -20,10 +21,11 @@ using System.Threading;
 // One thing that happened on the LIVE, as it arrives from TikTok (or from a test button).
 public class LiveEvent
 {
-    public const string Gift = "gift", Follow = "follow", Share = "share", Join = "join", Likes = "likes";
+    public const string Gift = "gift", Follow = "follow", Share = "share", Join = "join", Likes = "likes", Chat = "chat";
 
     public string Type = Gift;
     public string User = "", Nick = "", UserId = "";
+    public string Comment = "";  // chat: what the viewer wrote
     public string GiftName = "", GiftId = "", GroupId = "";
     public int Coins;            // coins per single gift
     public int RepeatCount = 1;  // gifts: how many so far in this combo; likes: how many likes in this message
@@ -32,6 +34,53 @@ public class LiveEvent
     public bool Test;
 
     public string Who { get { return User.Length > 0 ? "@" + User : (Nick.Length > 0 ? Nick : L.T("someone")); } }
+
+    // One viewer, the same across messages (for per-viewer cooldowns and the top lists).
+    public string ViewerKey { get { return UserId.Length > 0 ? UserId : User.ToLowerInvariant(); } }
+
+    // The first word of a chat message ("!boom please" -> "!boom").
+    public string FirstWord
+    {
+        get
+        {
+            string c = Comment.Trim();
+            int sp = c.IndexOfAny(new[] { ' ', '\t', ' ', '　' });
+            return sp >= 0 ? c.Substring(0, sp) : c;
+        }
+    }
+}
+
+// A profile: which topics are on, e.g. "Minecraft" = the Minecraft and Sounds topics, the rest off.
+public class Profile
+{
+    public int Id;
+    public string Name = "";
+    public List<int> On = new List<int>();
+
+    public static Profile Read(Dictionary<string, string> kv, int id)
+    {
+        Profile p = new Profile();
+        p.Id = id;
+        string pre = "profile." + id + ".", v;
+        if (kv.TryGetValue(pre + "name", out v)) p.Name = v.Trim();
+        if (kv.TryGetValue(pre + "on", out v))
+            foreach (string part in v.Split(','))
+            {
+                int g;
+                if (int.TryParse(part.Trim(), out g) && g > 0 && !p.On.Contains(g)) p.On.Add(g);
+            }
+        if (p.Name.Length == 0) p.Name = L.F("Profile {0}", id);
+        return p;
+    }
+
+    public void Write(StringBuilder b)
+    {
+        string pre = "profile." + Id + ".";
+        List<string> ids = new List<string>();
+        foreach (int g in On) ids.Add(g.ToString());
+        b.AppendLine(pre + "name=" + Name.Replace("\r", "").Replace("\n", " "));
+        b.AppendLine(pre + "on=" + string.Join(",", ids.ToArray()));
+    }
 }
 
 // A topic: a named, collapsible box of actions (e.g. "Minecraft", "Sounds") that can be switched on/off as a whole.
@@ -63,14 +112,20 @@ public class RuleGroup
     }
 }
 
-// One rule: when <trigger> happens, do <kind> (press a key / type text / play a sound).
+// One rule: when <trigger> happens, do <kind> (press a key / type text / play a sound / change a counter).
 public class GiftRule
 {
-    public const string KindKey = "key", KindText = "text", KindSound = "sound";
-    public static readonly string[] Kinds = { KindKey, KindText, KindSound };
-    public static readonly string[] KindNames = { L.N("Press a key"), L.N("Type text"), L.N("Play a sound") };
-    public static readonly string[] Triggers = { LiveEvent.Gift, LiveEvent.Follow, LiveEvent.Share, LiveEvent.Join, LiveEvent.Likes };
-    public static readonly string[] TriggerNames = { L.N("Gift"), L.N("Follow"), L.N("Share"), L.N("Viewer joins"), L.N("Likes") };
+    public const string KindKey = "key", KindText = "text", KindSound = "sound", KindCounter = "counter";
+    public static readonly string[] Kinds = { KindKey, KindText, KindSound, KindCounter };
+    public static readonly string[] KindNames = { L.N("Press a key"), L.N("Type text"), L.N("Play a sound"), L.N("Change a counter") };
+    public static readonly string[] Triggers = { LiveEvent.Gift, LiveEvent.Follow, LiveEvent.Share, LiveEvent.Join, LiveEvent.Likes, LiveEvent.Chat };
+    public static readonly string[] TriggerNames = { L.N("Gift"), L.N("Follow"), L.N("Share"), L.N("Viewer joins"), L.N("Likes"), L.N("Chat command") };
+    public const string OpAdd = "add", OpSubtract = "sub", OpSet = "set", OpCoins = "coins";
+    public static readonly string[] Ops = { OpAdd, OpSubtract, OpSet, OpCoins };
+    public static readonly string[] OpNames = { L.N("add"), L.N("subtract"), L.N("set to"), L.N("add the coins") };
+
+    // The name of a counter by id (set by the app; "change a counter" texts show it).
+    public static Func<int, string> CounterName = delegate (int id) { return "#" + id; };
 
     public int Id;
     public int GroupId;
@@ -90,32 +145,54 @@ public class GiftRule
     public int Volume = 80;            // 0-100
     public int Times = 1;              // how many times per trigger
     public bool PerGift = true;        // gifts: true = a x10 combo runs it 10 times; false = once per send
+    public string Command = "!boom";   // chat: the command(s) viewers type, comma separated
+    public int UserCooldownSec = 30;   // chat: each viewer can use it once every this many seconds
+    public int CounterId = 0;          // change a counter: which one
+    public string Op = OpAdd;          // change a counter: add / subtract / set to / add the gift's coins
+    public int Amount = 1;
 
     public GiftRule Clone() { return (GiftRule)MemberwiseClone(); }
 
     public bool AnyGift { get { string g = Gifts.Trim(); return g.Length == 0 || g == "*"; } }
 
-    // The gift names, split once per change of Gifts (not for every event).
-    string giftsParsed;
-    string[] giftList;
+    static string[] Split(string s)
+    {
+        List<string> l = new List<string>();
+        foreach (string part in s.Split(',')) { string t = part.Trim(); if (t.Length > 0) l.Add(t); }
+        return l.ToArray();
+    }
+
+    // The gift names and commands, split once per change (not for every event).
+    string giftsParsed, commandsParsed;
+    string[] giftList, commandList;
     string[] GiftList
     {
         get
         {
-            if (!ReferenceEquals(giftsParsed, Gifts))
-            {
-                List<string> l = new List<string>();
-                foreach (string part in Gifts.Split(',')) { string t = part.Trim(); if (t.Length > 0) l.Add(t); }
-                giftList = l.ToArray();
-                giftsParsed = Gifts;
-            }
+            if (!ReferenceEquals(giftsParsed, Gifts)) { giftList = Split(Gifts); giftsParsed = Gifts; }
             return giftList;
+        }
+    }
+    string[] CommandList
+    {
+        get
+        {
+            if (!ReferenceEquals(commandsParsed, Command)) { commandList = Split(Command); commandsParsed = Command; }
+            return commandList;
         }
     }
 
     public bool Matches(LiveEvent e)
     {
         if (!Enabled || e.Type != Trigger) return false;
+        if (Trigger == LiveEvent.Chat)
+        {
+            string word = e.FirstWord;
+            if (word.Length == 0) return false;
+            foreach (string c in CommandList)
+                if (string.Equals(c, word, StringComparison.OrdinalIgnoreCase)) return true;
+            return false;
+        }
         if (Trigger != LiveEvent.Gift) return true;
         if (MinCoins > 0 && e.Coins < MinCoins) return false;
         if (AnyGift) return true;
@@ -129,11 +206,16 @@ public class GiftRule
     {
         get
         {
+            if (Trigger == LiveEvent.Chat && CommandList.Length == 0) return false;
             if (Kind == KindText) return Text.Length > 0;
             if (Kind == KindSound) return SoundFile.Length > 0;
+            if (Kind == KindCounter) return CounterId > 0;
             return Key.IsSet;
         }
     }
+
+    // A sound or key action waits in a queue; changing a counter happens right away.
+    public bool Instant { get { return Kind == KindCounter; } }
 
     // What triggers it, in the user's language ("Rose (100+ coins)", "Follow", "Every 1000 likes").
     public string TriggerText
@@ -146,6 +228,7 @@ public class GiftRule
                 case LiveEvent.Share: return L.T("Share");
                 case LiveEvent.Join: return L.T("Viewer joins");
                 case LiveEvent.Likes: return L.F("Every {0} likes", EveryLikes);
+                case LiveEvent.Chat: return Command.Trim().Length > 0 ? L.F("Chat {0}", Command.Trim()) : L.T("Chat command");
             }
             string t = AnyGift ? L.T("Any gift") : Gifts.Trim();
             if (MinCoins > 0) t += " (" + L.F("{0}+ coins", MinCoins) + ")";
@@ -159,6 +242,13 @@ public class GiftRule
         get
         {
             string times = Times > 1 ? " x" + Times : "";
+            if (Kind == KindCounter)
+            {
+                string name = CounterId > 0 ? CounterName(CounterId) : L.T("(no counter picked)");
+                if (Op == OpSet) return L.F("set {0} to {1}", name, Amount);
+                if (Op == OpCoins) return L.F("{0} + the gift's coins", name) + times;
+                return name + (Op == OpSubtract ? " -" : " +") + Amount + times;
+            }
             if (Kind == KindSound) return L.F("play {0}", SoundFile.Length > 0 ? Path.GetFileName(SoundFile) : L.T("(no sound picked)")) + times;
             if (Kind == KindText)
                 return (Key.IsSet ? L.F("{0}, then type \"{1}\"", Key, Text) : L.F("type \"{0}\"", Text)) + (Enter ? " + Enter" : "") + times;
@@ -192,6 +282,11 @@ public class GiftRule
         if (kv.TryGetValue(pre + "volume", out v)) r.Volume = Settings.ParseInt(v, r.Volume, 0, 100);
         if (kv.TryGetValue(pre + "times", out v)) r.Times = Settings.ParseInt(v, 1, 1, 100);
         if (kv.TryGetValue(pre + "pergift", out v)) r.PerGift = Settings.ParseBool(v, true);
+        if (kv.TryGetValue(pre + "command", out v)) r.Command = v.Trim();
+        if (kv.TryGetValue(pre + "usercooldown", out v)) r.UserCooldownSec = Settings.ParseInt(v, r.UserCooldownSec, 0, 3600);
+        if (kv.TryGetValue(pre + "counter", out v)) r.CounterId = Settings.ParseInt(v, 0, 0, int.MaxValue);
+        if (kv.TryGetValue(pre + "op", out v) && Array.IndexOf(Ops, v.Trim()) >= 0) r.Op = v.Trim();
+        if (kv.TryGetValue(pre + "amount", out v)) r.Amount = Settings.ParseInt(v, 1, 0, 1000000);
         return r;
     }
 
@@ -215,6 +310,11 @@ public class GiftRule
         b.AppendLine(pre + "volume=" + Volume);
         b.AppendLine(pre + "times=" + Times);
         b.AppendLine(pre + "perGift=" + PerGift);
+        b.AppendLine(pre + "command=" + Command.Replace("\r", "").Replace("\n", " "));
+        b.AppendLine(pre + "userCooldown=" + UserCooldownSec);
+        b.AppendLine(pre + "counter=" + CounterId);
+        b.AppendLine(pre + "op=" + Op);
+        b.AppendLine(pre + "amount=" + Amount);
     }
 }
 
@@ -478,6 +578,7 @@ public class GiftEngine
     readonly Lane keys = new Lane(), sounds = new Lane();
     readonly Dictionary<string, Streak> streaks = new Dictionary<string, Streak>();
     readonly Dictionary<int, DateTime> lastRun = new Dictionary<int, DateTime>();
+    readonly Dictionary<string, DateTime> viewerRun = new Dictionary<string, DateTime>();   // chat commands: "<rule>|<viewer>"
     volatile int generation;   // goes up on "Stop and clear": jobs from before stop (also the one running)
     int queuePosted;           // 1 = a queue update is already on its way to the UI thread
     DateTime lastSweep = DateTime.UtcNow;
@@ -559,6 +660,7 @@ public class GiftEngine
         {
             case LiveEvent.Gift: OnGift(e); break;
             case LiveEvent.Likes: OnLikes(e); break;
+            case LiveEvent.Chat: OnChat(e); break;
             default: OnSimple(e); break;
         }
     }
@@ -568,16 +670,22 @@ public class GiftEngine
         bool first;
         int added = NewGifts(g, out first);
         if (added == 0 && !first) return;   // the closing message of a combo we already counted
+        app.W.Count(g, added);              // goals, timer and top lists count even while actions are paused
 
         string what = L.F("{0} sent {1}", g.Who, g.GiftName.Length > 0 ? g.GiftName : L.T("a gift")) + (added > 1 ? " x" + added : "") +
                       (g.Coins > 0 ? " (" + L.F("{0} coins", g.Coins * Math.Max(1, added)) + ")" : "") + (g.Test ? " [" + L.T("test") + "]" : "");
         if (!app.S.ActionsOn) { app.Log(what + " - " + L.T("actions are paused")); return; }
-        string result = RunRules(g, delegate (GiftRule r) { return r.PerGift && r.Kind != GiftRule.KindSound ? added : (first ? 1 : 0); });
+        string result = RunRules(g, delegate (GiftRule r)
+        {
+            if (r.Kind == GiftRule.KindCounter && r.Op == GiftRule.OpCoins) return added;   // the coins of every gift in the combo
+            return r.PerGift && r.Kind != GiftRule.KindSound ? added : (first ? 1 : 0);
+        });
         app.Log(what + " - " + (result ?? L.T("no action for it")));
     }
 
     void OnSimple(LiveEvent e)
     {
+        app.W.Count(e, 1);
         string what = (e.Type == LiveEvent.Follow ? L.F("{0} followed you", e.Who) : e.Type == LiveEvent.Share ? L.F("{0} shared your LIVE", e.Who) : L.F("{0} joined", e.Who)) +
                       (e.Test ? " [" + L.T("test") + "]" : "");
         if (!app.S.ActionsOn) { if (e.Type != LiveEvent.Join) app.Log(what + " - " + L.T("actions are paused")); return; }
@@ -591,19 +699,29 @@ public class GiftEngine
         long before = likeTotal;
         likeTotal += Math.Max(1, e.RepeatCount);
         long now = likeTotal;
+        app.W.Count(e, Math.Max(1, e.RepeatCount));
         if (!app.S.ActionsOn) return;
         string result = RunRules(e, delegate (GiftRule r)
         {
             long every = Math.Max(1, r.EveryLikes);
-            return (int)Math.Min(100, now / every - before / every);
+            long n = now / every - before / every;
+            return (int)Math.Min(r.Instant ? 1000000 : 100, n);   // a counter can take any number at once
         });
         if (result != null) app.Log(L.F("{0} likes", now) + (e.Test ? " [" + L.T("test") + "]" : "") + " - " + result);
+    }
+
+    // Chat: only messages that are a command (!boom) do anything, and only those are logged.
+    void OnChat(LiveEvent e)
+    {
+        if (!app.S.ActionsOn || e.FirstWord.Length == 0) return;
+        string result = RunRules(e, delegate (GiftRule r) { return 1; });
+        if (result != null) app.Log(L.F("{0} wrote {1}", e.Who, e.FirstWord) + (e.Test ? " [" + L.T("test") + "]" : "") + " - " + result);
     }
 
     // Queues every matching rule runsFor(rule) times (cooldowns applied). Returns a log text, or null if nothing ran.
     string RunRules(LiveEvent e, Func<GiftRule, int> runsFor)
     {
-        int queued = 0, dropped = 0, cooling = 0;
+        int queued = 0, dropped = 0, cooling = 0, changed = 0;
         DateTime now = DateTime.UtcNow;
         foreach (GiftRule r in app.S.Rules)
         {
@@ -614,22 +732,75 @@ public class GiftEngine
             if (r.CooldownSec > 0)
             {
                 if (lastRun.TryGetValue(r.Id, out last) && (now - last).TotalSeconds < r.CooldownSec) { cooling++; continue; }
-                runs = 1;
+                if (!(r.Instant && r.Op == GiftRule.OpCoins)) runs = 1;
+            }
+            string viewer = null;
+            if (e.Type == LiveEvent.Chat && r.UserCooldownSec > 0 && e.ViewerKey.Length > 0)
+            {
+                viewer = r.Id + "|" + e.ViewerKey;
+                if (viewerRun.TryGetValue(viewer, out last) && (now - last).TotalSeconds < r.UserCooldownSec) { cooling++; continue; }
             }
             int ran = 0;
-            for (int i = 0; i < runs; i++)
+            if (r.Instant) { if (RunCounter(r, e, runs)) { ran = 1; changed++; } }
+            else
+                for (int i = 0; i < runs; i++)
+                {
+                    if (Enqueue(r, e)) ran++; else dropped++;
+                }
+            if (ran > 0)
             {
-                if (Enqueue(r, e)) ran++; else dropped++;
+                lastRun[r.Id] = now;   // a skipped action (queue full) doesn't start its cooldown
+                if (viewer != null) RememberViewer(viewer, now);
             }
-            if (ran > 0) lastRun[r.Id] = now;   // a skipped action (queue full) doesn't start its cooldown
-            queued += ran;
+            if (!r.Instant) queued += ran;
         }
         if (queued > 0) Diag.Count("actions.queued", queued);
         if (dropped > 0) Diag.Count("actions.dropped", dropped);
         if (cooling > 0) Diag.Count("actions.cooling", cooling);
-        if (queued == 0 && dropped == 0)
+        if (queued == 0 && dropped == 0 && changed == 0)
             return cooling > 0 && e.Type != LiveEvent.Join ? L.T("waiting for cooldown") : null;
-        return (queued == 1 ? L.T("1 action queued") : L.F("{0} actions queued", queued)) + (dropped > 0 ? ", " + L.F("{0} skipped (queue full)", dropped) : "");
+        List<string> parts = new List<string>();
+        if (changed > 0) parts.Add(changed == 1 ? L.T("1 counter changed") : L.F("{0} counters changed", changed));
+        if (queued > 0) parts.Add(queued == 1 ? L.T("1 action queued") : L.F("{0} actions queued", queued));
+        if (dropped > 0) parts.Add(L.F("{0} skipped (queue full)", dropped));
+        return string.Join(", ", parts.ToArray());
+    }
+
+    void RememberViewer(string key, DateTime now)
+    {
+        if (viewerRun.Count > 5000)
+        {
+            // forget viewers whose cooldown is long over
+            List<string> old = new List<string>();
+            foreach (KeyValuePair<string, DateTime> kv in viewerRun) if ((now - kv.Value).TotalHours > 1) old.Add(kv.Key);
+            foreach (string k in old) viewerRun.Remove(k);
+        }
+        viewerRun[key] = now;
+    }
+
+    // "Change a counter": right away on the UI thread (no queue, no game needed). runs = how many
+    // times it was triggered (e.g. 10 for a x10 combo). Returns false if the counter is gone.
+    bool RunCounter(GiftRule r, LiveEvent e, int runs)
+    {
+        Counter c = app.S.Find(r.CounterId);
+        if (c == null)
+        {
+            app.Log(L.F("Skipped \"{0}\": its counter was removed. Pick another one.", r.Summary));
+            return false;
+        }
+        long times = (long)Math.Max(1, r.Times) * Math.Max(1, runs);
+        long value = c.Count;
+        switch (r.Op)
+        {
+            case GiftRule.OpSet: value = r.Amount; break;
+            case GiftRule.OpSubtract: value -= r.Amount * times; break;
+            case GiftRule.OpCoins: value += (long)Math.Max(e.Test ? 1 : 0, e.Coins) * times; break;
+            default: value += r.Amount * times; break;
+        }
+        app.SetCount(c, (int)Math.Max(0, Math.Min(int.MaxValue, value)));
+        Diag.Count("counters.changed");
+        Diag.Write("counters", r.Summary + " x" + runs + " -> " + c.DisplayName + " = " + c.Count);
+        return true;
     }
 
     // Test button on a rule: runs it once, whether or not actions are paused or cooling down.
@@ -639,6 +810,11 @@ public class GiftEngine
         e.Test = true;
         e.Type = r.Trigger;
         e.GiftName = r.Trigger == LiveEvent.Gift ? (r.AnyGift ? L.T("test gift") : r.Gifts.Split(',')[0].Trim()) : "";
+        if (r.Instant)
+        {
+            if (RunCounter(r, e, 1)) app.Log(L.F("Did: {0}", r.ActionText) + " (" + Source(new Job { Rule = r, Event = e }) + ")");
+            return;
+        }
         Enqueue(r, e);
     }
 

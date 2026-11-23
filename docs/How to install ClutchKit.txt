@@ -1,8 +1,10 @@
-ClutchKit 3.2 - stream toolkit for TikTok LIVE Studio
+ClutchKit 3.3 - stream toolkit for TikTok LIVE Studio
 ======================================================
 Counters for anything you want to track (deaths, wins, kills, attempts...), each with
 its own hotkeys, shown live on stream with your own font, colors and animations.
-Actions: gifts, follows, shares, joins and likes play sound alerts or press keys in your game.
+Widgets: goal bars, a subathon timer and top gifter / liker lists.
+Actions: gifts, follows, shares, joins, likes and chat commands play sound alerts,
+press keys in your game or change your counters.
 
 
 INSTALL
@@ -55,6 +57,22 @@ LANGUAGE: ClutchKit starts in your Windows language (English, Español, Portugu�
 Bahasa Indonesia, Türkçe, Deutsch, Français, Tiếng Việt). Change it on the "General" page.
 
 
+WIDGETS (GOAL BARS, SUBATHON TIMER, TOP LISTS)
+----------------------------------------------
+On the "Widgets" page. Each widget is its own Link source, so you can put it anywhere:
+click its "Copy link", then in LIVE Studio: Add source > Link > paste. "Preview" shows it
+in your web browser. Widgets use the font and colors of your first counter.
+  Goals         a bar for likes, follows, shares, coins, gifts, viewer joins or one of
+                your counters. "raise by" moves a reached goal up (e.g. +1000).
+  Subathon      press Start. Gifts (seconds per coin), follows, shares and likes add
+                time. +5 min / -5 min, Pause, Reset. If ClutchKit closes while it runs,
+                it waits paused until you press Go on.
+  Top lists     top gifters (coins) and top likers, for this LIVE or all time.
+This LIVE's top lists and goals start over by themselves when your next LIVE starts
+(or click "New LIVE: start over"). Goals, timer and top lists need the TikTok LIVE
+connection (see below), except goals that show a counter.
+
+
 ACTIONS (SOUND ALERTS, KEYS IN YOUR GAME)
 -----------------------------------------
 1. Get a free Euler Stream API key: on the "TikTok LIVE" page click
@@ -68,12 +86,17 @@ ACTIONS (SOUND ALERTS, KEYS IN YOUR GAME)
                    min. coins: only gifts worth at least this much (e.g. 100 for big gifts).
      Follow, Share, Viewer joins
      Likes         every N likes (e.g. every 1000).
+     Chat command  a word viewers type, e.g. !boom (several: !boom, !bomb).
+                   per viewer (s): each viewer can use it once every this many seconds.
+                   ClutchKit only reads the chat; it never writes in it.
    Then what it does:
      Play a sound  pick an MP3 or WAV file (it's copied into ClutchKit's "sounds"
                    folder) and set the volume. Sounds play one after another.
      Press a key   the key to press in your game, and how long to hold it.
      Type text     types text, e.g. a Minecraft command. "First" = a key pressed
                    before typing (T opens the chat in Minecraft).
+     Change a counter  add, subtract, set to, or add the gift's coins
+                   (e.g. every Rose = Deaths +1, or a coin counter).
    And how often:
      Times         how many times each time it's triggered.
      cooldown (s)  don't run it again within this many seconds
@@ -90,6 +113,10 @@ Keeping lots of actions tidy:
   "Open all" / "Close all" fold everything at once.
 - Search finds actions by gift, sound, text or topic name.
 - "Duplicate" copies an action right below the original; "Topic" moves it.
+- Profile: "Save..." remembers which topics are on (e.g. one per game); pick a
+  profile to switch to it.
+- "Export..." saves topics with their sounds in a .ckpack file to share or keep.
+  "Import..." adds someone's pack; imported topics start off, so check them first.
 
 Sound alerts play through your PC's speakers/headset, like any other sound.
 In LIVE Studio, make sure your desktop/system audio is turned on so viewers hear them.
@@ -129,3 +156,5 @@ The keyboard is only used to react to your chosen hotkeys; nothing you type is s
 The only internet connection is the TikTok LIVE connection, and only when you
 connect: your TikTok username and Euler Stream key go to Euler Stream, which
 sends back your LIVE's gifts. The key is saved in settings.ini on your PC.
+The top lists keep viewer names and their coins/likes in leaderboard.txt and live.txt
+on your PC only ("Clear" on the Widgets page empties them).

@@ -311,7 +311,8 @@ public static class Diag
         b.AppendLine("Actions queued " + Get("actions.queued") + ", skipped (queue full) " + Get("actions.dropped") + ", cooling down " + Get("actions.cooling") +
                      ", waiting now " + a.Engine.Waiting);
         b.AppendLine("Keys: OK " + Get("keys.ok") + ", blocked by Windows " + Get("keys.blocked") + ", skipped (game not in front) " + Get("keys.notfront"));
-        b.AppendLine("Sounds: played " + Get("sounds.played") + ", failed " + Get("sounds.failed"));
+        b.AppendLine("Sounds: played " + Get("sounds.played") + ", failed " + Get("sounds.failed") + ", counters changed by actions " + Get("counters.changed"));
+        b.AppendLine("Widgets: " + a.S.Goals.Count + " goal(s), timer " + a.W.TimerState + " " + Widgets.ClockText(a.W.TimeLeftMs) + ", top lists " + a.W.SessionFans + " people this LIVE");
         b.AppendLine("Overlay: " + Get("overlay.state") + " requests, last " + Ago("overlay") + (a.ServerError != null ? " - SERVER ERROR: " + a.ServerError : ""));
         b.AppendLine("Hotkeys: hook " + (a.KeysOk ? "OK" : "NOT WORKING") + ", pressed " + Get("hotkey.pressed"));
         b.Append("Errors: " + Get("errors") + (Verbose ? "   (detailed logging is on)" : ""));
@@ -381,6 +382,7 @@ public static class Diag
             string name = "\"" + r.Summary + "\"";
             if (!r.CanRun) problems.Add(name + ": nothing to do yet (no key / text / sound)");
             else if (r.Kind == GiftRule.KindSound && !File.Exists(r.SoundFile)) problems.Add(name + ": sound file is missing (" + Redact(r.SoundFile) + ")");
+            else if (r.Kind == GiftRule.KindCounter && s.Find(r.CounterId) == null) problems.Add(name + ": its counter was removed");
             if (r.Enabled && !s.GroupOn(r.GroupId)) problems.Add(name + ": its topic is switched off");
         }
         List<string> parts = new List<string>();
@@ -390,8 +392,22 @@ public static class Diag
         b.AppendLine("Queued " + Get("actions.queued") + ", skipped (queue full) " + Get("actions.dropped") + ", cooling down " + Get("actions.cooling"));
         b.AppendLine("Keys: OK " + Get("keys.ok") + ", blocked by Windows " + Get("keys.blocked") + ", skipped (game not in front) " + Get("keys.notfront") +
                      ", last program in front: " + NoteOf("keys.front"));
-        b.AppendLine("Sounds: played " + Get("sounds.played") + ", failed " + Get("sounds.failed"));
+        b.AppendLine("Sounds: played " + Get("sounds.played") + ", failed " + Get("sounds.failed") + ", counters changed by actions: " + Get("counters.changed"));
+        b.AppendLine("Profiles: " + s.Profiles.Count);
         foreach (string p in problems.Count > 40 ? problems.GetRange(0, 40) : problems) b.AppendLine("  ! " + p);
+
+        b.AppendLine();
+        b.AppendLine("== Widgets ==");
+        foreach (Goal g in s.Goals)
+            b.AppendLine("Goal " + g.Id + " \"" + g.Title + "\": " + g.Source + (g.Source == Goal.FromCounter ? " " + g.CounterId : "") + ", " + a.W.GoalValue(g) +
+                         " / " + g.Target + (g.Step > 0 ? ", raise by " + g.Step : "") + (g.Restart ? ", starts over" : "") + (g.Visible ? "" : ", hidden"));
+        if (s.Goals.Count == 0) b.AppendLine("Goals: none");
+        b.AppendLine("Goals reached: " + Get("goals.reached"));
+        b.AppendLine("Timer: " + a.W.TimerState + ", " + Widgets.ClockText(a.W.TimeLeftMs) + " left, starts at " + s.Timer.StartMin + " min, max " + s.Timer.MaxHours +
+                     " h, seconds per coin " + s.Timer.PerCoin + " / follow " + s.Timer.PerFollow + " / share " + s.Timer.PerShare + " / 100 likes " + s.Timer.Per100Likes +
+                     (s.Timer.Visible ? "" : ", hidden"));
+        b.AppendLine("Top lists: " + a.W.SessionFans + " people this LIVE, " + a.W.AllTimeFans + " all time; gifters " + (s.TopGifters.AllTime ? "all time" : "this LIVE") +
+                     " top " + s.TopGifters.Count + ", likers " + (s.TopLikers.AllTime ? "all time" : "this LIVE") + " top " + s.TopLikers.Count);
 
         b.AppendLine();
         b.AppendLine("== Errors (last 50) ==");

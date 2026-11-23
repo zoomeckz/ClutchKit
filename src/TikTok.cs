@@ -1,4 +1,4 @@
-// ClutchKit - TikTok LIVE connection: reads gifts, follows, shares, joins and likes from your LIVE so they can trigger actions.
+// ClutchKit - TikTok LIVE connection: reads gifts, follows, shares, joins, likes and chat from your LIVE so they can trigger actions.
 // ----------------------------------------------------------------------------------
 // TikTok has no official API for LIVE events. ClutchKit uses Euler Stream's WebSocket service
 // (wss://ws.eulerstream.com, free account + API key), which connects to TikTok and passes the
@@ -217,6 +217,7 @@ public class TikTokLive
                     Diag.Count("tiktok.connected");
                     Report(State.Connected, L.F("Connected - listening to @{0}'s LIVE.", user));
                     app.Log("TikTok LIVE: " + L.F("connected to @{0}.", user));
+                    app.Ui(delegate { app.W.OnLiveStarted(); });   // a new LIVE? its top lists and goals start over
                 }
                 Handle(data, length, json);
                 message.SetLength(0);
@@ -325,6 +326,9 @@ public class TikTokLive
             case "WebcastLikeMessage":
                 Send(ParseLikes(data), type);
                 break;
+            case "WebcastChatMessage":
+                Send(ParseChat(data), type);
+                break;
             case "room.status":
                 string state = Str(data, "state");
                 if (state == "connected") Report(State.Connected, L.F("Connected - listening to @{0}'s LIVE.", User));
@@ -336,7 +340,7 @@ public class TikTokLive
                 if (Num(data, "action") == 3)
                 {
                     app.Log("TikTok LIVE: " + L.T("the LIVE ended."));
-                    app.Ui(delegate { app.Engine.ResetLikes(); });   // the next LIVE counts likes from 0
+                    app.Ui(delegate { app.Engine.ResetLikes(); app.W.LiveEnded(); });   // the next LIVE counts from 0
                     Report(State.Waiting, L.F("@{0}'s LIVE has ended or is offline.", User));
                 }
                 break;
@@ -372,7 +376,8 @@ public class TikTokLive
             Diag.Write("tiktok", type + " -> " + e.Type + " from " + e.Who +
                        (e.Type == LiveEvent.Gift ? ": \"" + e.GiftName + "\" id " + e.GiftId + ", " + e.Coins + " coins, repeat " + e.RepeatCount +
                                                    (e.RepeatEnd ? " (end)" : "") + (e.Streakable ? ", combo" : "") : "") +
-                       (e.Type == LiveEvent.Likes ? ": " + e.RepeatCount + " likes" : ""));
+                       (e.Type == LiveEvent.Likes ? ": " + e.RepeatCount + " likes" : "") +
+                       (e.Type == LiveEvent.Chat ? ": " + (e.Comment.Length > 80 ? e.Comment.Substring(0, 80) + "..." : e.Comment) : ""));
         app.Ui(delegate { app.Engine.OnEvent(e); });
     }
 
@@ -407,6 +412,14 @@ public class TikTokLive
         string action = Str(data, "action");
         bool join = actionId <= 1 && (action.Length == 0 || action == "0" || action == "1" || action.ToUpperInvariant().Contains("JOIN"));
         return join ? WithUser(data, LiveEvent.Join) : null;
+    }
+
+    // A chat message ("content" in TikTok's own format, "comment" in some versions).
+    public static LiveEvent ParseChat(Dictionary<string, object> data)
+    {
+        LiveEvent e = WithUser(data, LiveEvent.Chat);
+        e.Comment = First(Str(data, "content"), Str(data, "comment")).Trim();
+        return e.Comment.Length > 0 ? e : null;
     }
 
     public static LiveEvent ParseLikes(Dictionary<string, object> data)

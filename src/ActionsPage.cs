@@ -20,6 +20,8 @@ public partial class MainForm
     Button elevBtn, pauseKeyBtn, connectBtn;
     CheckBox actionsOnBox;
     TextBox searchBox;
+    ComboBox profileBox;
+    bool fillingProfiles;
     Timer searchTimer;
     int scrollToRule = -1;
     readonly List<ListBox> logBoxes = new List<ListBox>();
@@ -90,6 +92,13 @@ public partial class MainForm
         testType.SelectedIndex = 0;
         ComboBox testGift = GiftCombo(p, 166, 348, 140);
         testGift.Text = "Rose";
+        TextBox testCmd = new TextBox();
+        UI.Style(testCmd);
+        testCmd.BorderStyle = BorderStyle.FixedSingle;
+        testCmd.Text = "!boom";
+        testCmd.Location = new Point(UI.D(166), UI.D(349));
+        testCmd.Size = new Size(UI.D(140), UI.D(28));
+        p.Controls.Add(testCmd);
         Label testX = UI.Lbl(p, "x", 312, 352, 16, 10f, UI.Muted, FontStyle.Regular);
         NumericUpDown testCount = UI.Number(p, 330, 348, 1, 100000, 1, 1);
         testCount.Size = new Size(UI.D(64), UI.D(30));
@@ -101,6 +110,7 @@ public partial class MainForm
             string type = GiftRule.Triggers[testType.SelectedIndex];
             bool gift = type == LiveEvent.Gift, likes = type == LiveEvent.Likes;
             testGift.Visible = testCoinsLbl.Visible = testCoins.Visible = gift;
+            testCmd.Visible = type == LiveEvent.Chat;
             testX.Visible = testCount.Visible = gift || likes;
             if (likes && testCount.Value < 10) testCount.Value = 100;
         };
@@ -116,6 +126,7 @@ public partial class MainForm
             e.GiftName = testGift.Text.Trim();
             e.RepeatCount = (int)testCount.Value;
             e.Coins = (int)testCoins.Value;
+            e.Comment = testCmd.Text.Trim();
             Countdown(sendTest, L.T("Send in 3 s"), delegate { app.Engine.OnEvent(e); });
         };
         UI.Para(p, L.T("Acts exactly like the real thing. Click into your game during the countdown."), 38, 386, 620, 24);
@@ -156,11 +167,53 @@ public partial class MainForm
             app.ApplySettings();
             RebuildRules();
         };
-        actionsMsg = UI.Para(p, L.T("Click a key button, then press the key (Esc = cancel)."), 38, 644, 632, 24);
+        // share topics with other streamers (with their sounds)
+        Button export = UI.Btn(p, L.T("Export..."), 440, 570, 112, 32, false);
+        export.Click += delegate { ExportTopics(); };
+        Button import = UI.Btn(p, L.T("Import..."), 558, 570, 112, 32, false);
+        import.Click += delegate { ImportTopics(); };
+
+        // profiles: which topics are on (e.g. one per game)
+        UI.Lbl(p, L.T("Profile"), 38, 654, 80, 10f, UI.Muted, FontStyle.Regular);
+        profileBox = UI.Combo(p, 120, 648, 200);
+        Button saveProfile = UI.Btn(p, L.T("Save..."), 328, 646, 116, 34, false);
+        Button deleteProfile = UI.Btn(p, L.T("Delete"), 450, 646, 100, 34, false);
+        FillProfiles(null);
+        profileBox.SelectedIndexChanged += delegate
+        {
+            deleteProfile.Enabled = profileBox.SelectedIndex > 0;
+            if (fillingProfiles || profileBox.SelectedIndex <= 0) return;
+            Profile pr = app.S.Profiles[profileBox.SelectedIndex - 1];
+            app.ApplyProfile(pr);
+            RebuildRules();
+            ActionsMessage(L.F("Profile \"{0}\": its topics are on, the others off.", pr.Name), UI.Good);
+        };
+        deleteProfile.Enabled = false;
+        saveProfile.Click += delegate
+        {
+            Profile cur = profileBox.SelectedIndex > 0 ? app.S.Profiles[profileBox.SelectedIndex - 1] : null;
+            string name = AskText(L.T("Save profile"), L.T("A profile remembers which topics are on (e.g. one per game). Name:"), cur != null ? cur.Name : "");
+            if (name == null) return;
+            Profile saved = app.SaveProfile(name);
+            if (saved == null) { ActionsMessage(L.F("That's the maximum of {0} profiles.", 50), UI.Warn); return; }
+            FillProfiles(saved);
+            ActionsMessage(L.F("Saved the profile \"{0}\" ({1} topics on).", saved.Name, saved.On.Count), UI.Good);
+        };
+        deleteProfile.Click += delegate
+        {
+            if (profileBox.SelectedIndex <= 0) return;
+            Profile pr = app.S.Profiles[profileBox.SelectedIndex - 1];
+            if (MessageBox.Show(this, L.F("Delete the profile \"{0}\"? Your topics and actions stay.", pr.Name), "ClutchKit",
+                    MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+            app.DeleteProfile(pr);
+            FillProfiles(null);
+        };
+
+        actionsMsg = UI.Para(p, L.T("Click a key button, then press the key (Esc = cancel)."), 38, 692, 632, 24);
 
         rulesHost = new Panel();
         rulesHost.BackColor = UI.Bg;
-        rulesHost.Location = new Point(UI.D(38), UI.D(674));
+        rulesHost.Location = new Point(UI.D(38), UI.D(722));
         rulesHost.Width = UI.D(632);
         p.Controls.Add(rulesHost);
         RebuildRules();
@@ -362,17 +415,19 @@ public partial class MainForm
             app.RemoveRule(r);
             RebuildLater();
         };
-        MethodInvoker testLabel = delegate { test.Text = r.Kind == GiftRule.KindSound ? L.T("Test") : L.T("Test in 3 s"); };
+        MethodInvoker testLabel = delegate { test.Text = r.Kind == GiftRule.KindSound || r.Instant ? L.T("Test") : L.T("Test in 3 s"); };
         testLabel();
         test.Click += delegate
         {
             if (!r.CanRun)
             {
-                ActionsMessage(r.Kind == GiftRule.KindText ? L.T("Type the text first.") : r.Kind == GiftRule.KindSound ? L.T("Pick a sound first.") : L.T("Pick a key first."), UI.Warn);
+                ActionsMessage(r.Trigger == LiveEvent.Chat && r.Command.Trim().Length == 0 ? L.T("Type the command first (e.g. !boom).") :
+                               r.Kind == GiftRule.KindText ? L.T("Type the text first.") : r.Kind == GiftRule.KindSound ? L.T("Pick a sound first.") :
+                               r.Kind == GiftRule.KindCounter ? L.T("Pick a counter first.") : L.T("Pick a key first."), UI.Warn);
                 if (r.Collapsed) { r.Collapsed = false; RebuildLater(); }
                 return;
             }
-            if (r.Kind == GiftRule.KindSound) { app.Engine.RunTest(r); return; }
+            if (r.Kind == GiftRule.KindSound || r.Instant) { app.Engine.RunTest(r); return; }
             Countdown(test, L.T("Test in 3 s"), delegate { app.Engine.RunTest(r); });
             ActionsMessage(L.T("Click into your game now - it runs in 3 seconds."), UI.Warn);
         };
@@ -387,6 +442,15 @@ public partial class MainForm
         ComboBox gift = GiftCombo(card, 154, y0, 170);
         gift.Text = r.Gifts;
         gift.TextChanged += delegate { r.Gifts = gift.Text.Trim(); refresh(); Changed(); };
+        TextBox cmd = new TextBox();   // chat command(s), e.g. "!boom" or "!boom, !bomb"
+        UI.Style(cmd);
+        cmd.BorderStyle = BorderStyle.FixedSingle;
+        cmd.Text = r.Command;
+        cmd.Location = new Point(UI.D(154), UI.D(y0 + 1));
+        cmd.Size = new Size(UI.D(170), UI.D(28));
+        cmd.TextChanged += delegate { r.Command = cmd.Text.Trim(); refresh(); Changed(); };
+        card.Controls.Add(cmd);
+        Hint(cmd, "!boom");
         Label amountLbl = UI.Lbl(card, "", 332, y0 + 4, 96, 10f, UI.Muted, FontStyle.Regular);
         NumericUpDown amount = UI.Number(card, 430, y0, 0, 10000000, 0, 1);
         amount.Size = new Size(UI.D(80), UI.D(30));
@@ -425,6 +489,23 @@ public partial class MainForm
         NumericUpDown vol = UI.Number(card, 556, y1, 0, 100, r.Volume, 5);
         vol.Size = new Size(UI.D(56), UI.D(30));
         vol.ValueChanged += delegate { r.Volume = (int)vol.Value; Changed(); };
+        ComboBox counterBox = UI.Combo(card, 166, y1, 160);   // change a counter: which one, how, by how much
+        foreach (Counter c in app.S.Counters) counterBox.Items.Add(c.DisplayName);
+        int ci = app.S.Counters.FindIndex(delegate (Counter c) { return c.Id == r.CounterId; });
+        if (ci < 0 && r.CounterId > 0) { counterBox.Items.Add(L.T("(counter removed)")); ci = counterBox.Items.Count - 1; }
+        counterBox.SelectedIndex = Math.Max(0, ci);
+        ComboBox opBox = UI.Combo(card, 334, y1, 126);
+        opBox.Items.AddRange(L.All(GiftRule.OpNames));
+        opBox.SelectedIndex = Math.Max(0, Array.IndexOf(GiftRule.Ops, r.Op));
+        NumericUpDown opAmount = UI.Number(card, 468, y1, 0, 1000000, r.Amount, 1);
+        opAmount.Size = new Size(UI.D(80), UI.D(30));
+        opAmount.ValueChanged += delegate { r.Amount = (int)opAmount.Value; refresh(); Changed(); };
+        counterBox.SelectedIndexChanged += delegate
+        {
+            if (counterBox.SelectedIndex < app.S.Counters.Count) r.CounterId = app.S.Counters[counterBox.SelectedIndex].Id;
+            refresh();
+            Changed();
+        };
 
         // row 3: how often
         int y2 = y1 + 46;
@@ -460,21 +541,25 @@ public partial class MainForm
         bool building = true;
         MethodInvoker layout = delegate
         {
-            bool isGift = r.Trigger == LiveEvent.Gift, isLikes = r.Trigger == LiveEvent.Likes;
-            bool isText = r.Kind == GiftRule.KindText, isSound = r.Kind == GiftRule.KindSound;
+            bool isGift = r.Trigger == LiveEvent.Gift, isLikes = r.Trigger == LiveEvent.Likes, isChat = r.Trigger == LiveEvent.Chat;
+            bool isText = r.Kind == GiftRule.KindText, isSound = r.Kind == GiftRule.KindSound, isCounter = r.Kind == GiftRule.KindCounter;
             gift.Visible = isGift;
-            amountLbl.Visible = amount.Visible = isGift || isLikes;
-            amountLbl.Text = isLikes ? L.T("every (likes)") : L.T("min. coins");
+            cmd.Visible = isChat;
+            amountLbl.Visible = amount.Visible = isGift || isLikes || isChat;
+            amountLbl.Text = isLikes ? L.T("every (likes)") : isChat ? L.T("per viewer (s)") : L.T("min. coins");
             building = true;
             amount.Minimum = isLikes ? 1 : 0;
-            amount.Value = Math.Max(amount.Minimum, Math.Min(amount.Maximum, isLikes ? r.EveryLikes : r.MinCoins));
+            amount.Value = Math.Max(amount.Minimum, Math.Min(amount.Maximum, isLikes ? r.EveryLikes : isChat ? r.UserCooldownSec : r.MinCoins));
             building = false;
-            key.Visible = !isSound;
-            holdLbl.Visible = hold.Visible = !isText && !isSound;
+            key.Visible = !isSound && !isCounter;
+            holdLbl.Visible = hold.Visible = !isText && !isSound && !isCounter;
             text.Visible = enter.Visible = isText;
             sound.Visible = browse.Visible = volLbl.Visible = vol.Visible = isSound;
             sound.Text = r.SoundFile.Length > 0 ? Path.GetFileName(r.SoundFile) : L.T("(no sound picked)");
-            perGift.Visible = isGift && !isSound;   // sounds play once per gift send
+            counterBox.Visible = opBox.Visible = isCounter;
+            opAmount.Visible = isCounter && r.Op != GiftRule.OpCoins;
+            if (isCounter && !isGift && r.Op == GiftRule.OpCoins) { r.Op = GiftRule.OpAdd; opBox.SelectedIndex = 0; }   // only gifts have coins
+            perGift.Visible = isGift && !isSound && !(isCounter && r.Op == GiftRule.OpCoins);   // sounds play once per gift send
             if (key != keyCapBtn) key.Text = isText ? (r.Key.IsSet ? L.F("First: {0}", r.Key) : L.T("First: no key")) : r.Key.ToString();
             key.ForeColor = r.Key.IsSet ? UI.Text : UI.Muted;
             testLabel();
@@ -483,8 +568,16 @@ public partial class MainForm
         amount.ValueChanged += delegate
         {
             if (building) return;
-            if (r.Trigger == LiveEvent.Likes) r.EveryLikes = (int)amount.Value; else r.MinCoins = (int)amount.Value;
+            if (r.Trigger == LiveEvent.Likes) r.EveryLikes = (int)amount.Value;
+            else if (r.Trigger == LiveEvent.Chat) r.UserCooldownSec = (int)amount.Value;
+            else r.MinCoins = (int)amount.Value;
             refresh();
+            Changed();
+        };
+        opBox.SelectedIndexChanged += delegate
+        {
+            r.Op = GiftRule.Ops[opBox.SelectedIndex];
+            layout();
             Changed();
         };
         trigger.SelectedIndexChanged += delegate
@@ -497,6 +590,12 @@ public partial class MainForm
         kind.SelectedIndexChanged += delegate
         {
             r.Kind = GiftRule.Kinds[kind.SelectedIndex];
+            if (r.Kind == GiftRule.KindCounter && app.S.Find(r.CounterId) == null && app.S.Counters.Count > 0)
+            {
+                r.CounterId = app.S.Counters[0].Id;   // start with the first counter
+                if (counterBox.Items.Count > app.S.Counters.Count) counterBox.Items.RemoveAt(counterBox.Items.Count - 1);
+                counterBox.SelectedIndex = 0;
+            }
             layout();
             Changed();
         };
@@ -519,6 +618,90 @@ public partial class MainForm
         };
         layout();
         return card;
+    }
+
+    // ---------------- profiles, export, import ----------------
+
+    void FillProfiles(Profile select)
+    {
+        fillingProfiles = true;
+        profileBox.BeginUpdate();
+        profileBox.Items.Clear();
+        profileBox.Items.Add(app.S.Profiles.Count == 0 ? L.T("(none saved yet)") : L.T("(pick a profile)"));
+        foreach (Profile pr in app.S.Profiles) profileBox.Items.Add(pr.Name);
+        int at = select != null ? app.S.Profiles.IndexOf(select) + 1 : 0;
+        profileBox.SelectedIndex = Math.Max(0, at);
+        profileBox.EndUpdate();
+        fillingProfiles = false;
+    }
+
+    // Saves topics (with their actions and sound files) in one file, to share or keep.
+    void ExportTopics()
+    {
+        List<RuleGroup> pick = new List<RuleGroup>();
+        using (Form f = new Form())
+        {
+            f.Text = L.T("Export topics");
+            f.Icon = app.AppIcon;
+            f.BackColor = UI.Bg;
+            f.ForeColor = UI.Text;
+            f.Font = UI.F(10f, FontStyle.Regular);
+            f.FormBorderStyle = FormBorderStyle.FixedDialog;
+            f.MaximizeBox = false;
+            f.MinimizeBox = false;
+            f.ShowInTaskbar = false;
+            f.StartPosition = FormStartPosition.CenterParent;
+            f.ClientSize = new Size(UI.D(440), UI.D(380));
+            UI.Para(f, L.T("Which topics? Their actions and sound files go into one .ckpack file that another ClutchKit can import."), 20, 16, 400, 44);
+            CheckedListBox list = new CheckedListBox();
+            UI.Style(list);
+            list.BorderStyle = BorderStyle.None;
+            list.CheckOnClick = true;
+            list.IntegralHeight = false;
+            list.Location = new Point(UI.D(20), UI.D(66));
+            list.Size = new Size(UI.D(400), UI.D(240));
+            foreach (RuleGroup g in app.S.Groups)
+            {
+                int n = app.S.Rules.FindAll(delegate (GiftRule r) { return r.GroupId == g.Id; }).Count;
+                list.Items.Add(g.Name + "   (" + n + ")", true);
+            }
+            f.Controls.Add(list);
+            Button ok = UI.Btn(f, L.T("Export..."), 200, 322, 116, 38, true);
+            Button cancel = UI.Btn(f, L.T("Cancel"), 322, 322, 98, 38, false);
+            ok.DialogResult = DialogResult.OK;
+            cancel.DialogResult = DialogResult.Cancel;
+            f.AcceptButton = ok;
+            f.CancelButton = cancel;
+            if (f.ShowDialog(this) != DialogResult.OK) return;
+            foreach (int i in list.CheckedIndices) pick.Add(app.S.Groups[i]);
+        }
+        if (pick.Count == 0) { ActionsMessage(L.T("No topic picked - nothing exported."), UI.Muted); return; }
+        using (SaveFileDialog d = new SaveFileDialog())
+        {
+            d.Title = L.T("Export topics");
+            d.Filter = L.T("ClutchKit actions") + " (*.ckpack)|*.ckpack";
+            d.FileName = (pick.Count == 1 ? Packs.SafeName(pick[0].Name) : "ClutchKit actions") + ".ckpack";
+            try { d.InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.Desktop); } catch { }
+            if (d.ShowDialog(this) != DialogResult.OK) return;
+            string error = Packs.Export(app, pick, d.FileName);
+            if (error != null) ActionsMessage(L.F("Couldn't export: {0}", error), UI.Warn);
+            else ActionsMessage(L.F("Exported {0} topic(s) to {1}.", pick.Count, Path.GetFileName(d.FileName)), UI.Good);
+        }
+    }
+
+    void ImportTopics()
+    {
+        using (OpenFileDialog d = new OpenFileDialog())
+        {
+            d.Title = L.T("Import topics");
+            d.Filter = L.T("ClutchKit actions") + " (*.ckpack)|*.ckpack|" + L.T("All files") + "|*.*";
+            if (d.ShowDialog(this) != DialogResult.OK) return;
+            string message;
+            bool ok = Packs.Import(app, d.FileName, out message);
+            if (searchBox.Text.Length > 0) searchBox.Text = "";
+            RebuildRules();
+            ActionsMessage(message, ok ? UI.Good : UI.Warn);
+        }
     }
 
     // Small "type a name" window (new topic, rename). Returns the text, or null if cancelled/empty.

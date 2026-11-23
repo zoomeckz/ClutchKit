@@ -1,8 +1,9 @@
 # ClutchKit
 
 Stream toolkit for **TikTok LIVE Studio** on Windows: on-stream **counters** (deaths, wins, kills, attempts, ...)
-that you change with hotkeys while you play, and **actions**: gifts, follows, shares, joins and likes play sound alerts
-or press keys in your game.
+that you change with hotkeys while you play, **stream widgets** (goal bars, a subathon timer, top gifters), and
+**actions**: gifts, follows, shares, joins, likes and chat commands play sound alerts, press keys in your game or
+change your counters.
 
 **Counters**
 - As many counters as you need (up to 8), each with its own hotkeys and its own look
@@ -12,9 +13,18 @@ or press keys in your game.
   (or use a capture window instead)
 - Works no matter whether LIVE Studio or ClutchKit is started first
 
+**Stream widgets**
+- Goal bars for likes, follows, shares, coins, gifts, joins or any counter; a reached goal can raise itself
+  (e.g. +1000) so the bar keeps going
+- A subathon timer: gifts (per coin), follows, shares and likes add time; start, pause, +/- 5 min, a maximum
+- Top gifter and top liker lists, for this LIVE or all time
+- Each widget is its own Link source in LIVE Studio, so you can place it anywhere; "Preview" shows it in your browser
+- This LIVE's lists and goals start over by themselves when your next LIVE starts
+
 **Actions**
 - Triggers: a gift (by name, or any gift worth at least N coins), a follow, a share, a viewer joining,
-  or every N likes
+  every N likes, or a chat command such as `!boom` (with a cooldown per viewer; ClutchKit never writes in chat)
+- Change a counter: add, subtract, set, or add the gift's coins (e.g. every Rose = +1 death)
 - Sound alerts with no limits: MP3/WAV played by ClutchKit itself (not through the overlay), with volume,
   one after another so they never talk over each other
 - Press a key in your game, or type text such as a Minecraft command
@@ -26,6 +36,9 @@ or press keys in your game.
 - Test buttons and fake events, so you can set everything up offline
 - Stays tidy with lots of actions: sort them into topics (e.g. one per game) that fold up and can be switched
   on/off as a whole, fold each action to one line, search, and duplicate actions
+- Profiles: save which topics are on (e.g. one per game) and switch with one click
+- Export topics with their sounds to a `.ckpack` file and import other streamers' packs (imported topics
+  start switched off, so you can check them first)
 - LIVE events are read through [Euler Stream](https://www.eulerstream.com) (free account and API key), because
   TikTok has no official API for LIVE events
 

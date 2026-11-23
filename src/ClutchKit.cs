@@ -1,8 +1,9 @@
 // ClutchKit - stream toolkit for TikTok LIVE Studio.
 // ----------------------------------------------------------------------------------
 // Counters (as many as you like, each with its own hotkeys and its own look) shown in one overlay,
-// and actions: LIVE gifts, follows, shares, joins and likes play sounds or press keys in your game (Actions.cs, TikTok.cs, ActionsPage.cs).
-// Menu: General > Counters > Actions > TikTok LIVE > Overlay (how it gets on stream) > Settings (app options) > Debug (Debug.cs, DebugPage.cs).
+// stream widgets (goal bars, subathon timer, top lists: Widgets.cs, WidgetsPage.cs), and actions: LIVE gifts, follows,
+// shares, joins, likes and chat commands play sounds, press keys or change counters (Actions.cs, TikTok.cs, ActionsPage.cs, Packs.cs).
+// Menu: General > Counters > Widgets > Actions > TikTok LIVE > Overlay (how it gets on stream) > Settings (app options) > Debug (Debug.cs, DebugPage.cs).
 // Overlay modes:
 //   - Link overlay: a "data:" link pasted once into LIVE Studio (Add source > Link). It loads the
 //     overlay script from this app (http://127.0.0.1:<port>, this PC only), so every change made in
@@ -39,14 +40,14 @@ using Microsoft.Win32;
 [assembly: AssemblyProduct("ClutchKit")]
 [assembly: AssemblyCompany("ClutchKit")]
 [assembly: AssemblyCopyright("Copyright (c) 2026 ClutchKit")]
-[assembly: AssemblyVersion("3.2.0.0")]
-[assembly: AssemblyFileVersion("3.2.0.0")]
-[assembly: AssemblyInformationalVersion("3.2")]
+[assembly: AssemblyVersion("3.3.0.0")]
+[assembly: AssemblyFileVersion("3.3.0.0")]
+[assembly: AssemblyInformationalVersion("3.3")]
 
 static class Program
 {
     public const string Name = "ClutchKit";
-    public const string Version = "3.2";
+    public const string Version = "3.3";
     // Shared with the older "Death Counter" builds so old and new never run (and count) at the same time.
     public static string MutexName = "Local\\DeathCounterTikTok";
 
@@ -481,9 +482,15 @@ public class Settings
     public string OnlyProcess = "";              // only press keys while this program is in front ("" = any)
     public int GapMs = 80;                       // pause between actions
     public int MaxQueue = 50;                    // actions waiting at most; more are skipped
+    public List<Profile> Profiles = new List<Profile>();
     // TikTok LIVE connection
     public string TikTokUser = "", TikTokKey = "";
     public bool AutoConnect = false;
+    // stream widgets
+    public const int MaxGoals = 8;
+    public List<Goal> Goals = new List<Goal>();
+    public TimerSetup Timer = new TimerSetup();
+    public TopSetup TopGifters = new TopSetup("gifters"), TopLikers = new TopSetup("likers");
 
     public static string ToHex(Color c) { return "#" + c.R.ToString("x2") + c.G.ToString("x2") + c.B.ToString("x2"); }
     public static string CleanFont(string v) { return v.Trim().Replace("'", "").Replace("\"", ""); }
@@ -507,23 +514,43 @@ public class Settings
         return int.TryParse(v.Trim(), out n) ? Math.Max(min, Math.Min(max, n)) : fallback;
     }
 
+    // "key=value" lines (keys in lower case; # and ; start a comment line).
+    public static Dictionary<string, string> ReadKv(IEnumerable<string> lines)
+    {
+        Dictionary<string, string> kv = new Dictionary<string, string>();
+        foreach (string raw in lines)
+        {
+            string line = raw.Trim();
+            if (line.Length == 0 || line.StartsWith("#") || line.StartsWith(";")) continue;
+            int eq = line.IndexOf('=');
+            if (eq < 0) continue;
+            kv[line.Substring(0, eq).Trim().ToLowerInvariant()] = line.Substring(eq + 1);
+        }
+        return kv;
+    }
+
+    // The ids in a "1,2,3" list, each once and at most max of them.
+    public static List<int> IdList(Dictionary<string, string> kv, string key, int max)
+    {
+        List<int> ids = new List<int>();
+        string v;
+        if (!kv.TryGetValue(key, out v)) return ids;
+        foreach (string part in v.Split(','))
+        {
+            int id;
+            if (int.TryParse(part.Trim(), out id) && id > 0 && !ids.Contains(id)) ids.Add(id);
+            if (ids.Count >= max) break;
+        }
+        return ids;
+    }
+
     public static Settings Load(string path)
     {
         Settings s = new Settings();
         Dictionary<string, string> kv = new Dictionary<string, string>();
         if (File.Exists(path))
         {
-            try
-            {
-                foreach (string raw in File.ReadAllLines(path))
-                {
-                    string line = raw.Trim();
-                    if (line.Length == 0 || line.StartsWith("#") || line.StartsWith(";")) continue;
-                    int eq = line.IndexOf('=');
-                    if (eq < 0) continue;
-                    kv[line.Substring(0, eq).Trim().ToLowerInvariant()] = line.Substring(eq + 1);
-                }
-            }
+            try { kv = ReadKv(File.ReadAllLines(path)); }
             catch { }
         }
         string v;
@@ -573,6 +600,11 @@ public class Settings
             }
         }
         s.FixGroups();
+        foreach (int id in IdList(kv, "profiles", 50)) s.Profiles.Add(Profile.Read(kv, id));
+        foreach (int id in IdList(kv, "goals", MaxGoals)) s.Goals.Add(Goal.Read(kv, id));
+        s.Timer.Read(kv);
+        s.TopGifters.Read(kv);
+        s.TopLikers.Read(kv);
 
         // the look from older versions (one look for everything) becomes every counter's starting look
         Style shared = new Style();
@@ -699,6 +731,17 @@ public class Settings
         foreach (GiftRule r in Rules) rids.Add(r.Id.ToString());
         b.AppendLine("rules=" + string.Join(",", rids.ToArray()));
         foreach (GiftRule r in Rules) r.Write(b);
+        List<string> pids = new List<string>();
+        foreach (Profile p in Profiles) pids.Add(p.Id.ToString());
+        b.AppendLine("profiles=" + string.Join(",", pids.ToArray()));
+        foreach (Profile p in Profiles) p.Write(b);
+        List<string> goalIds = new List<string>();
+        foreach (Goal g in Goals) goalIds.Add(g.Id.ToString());
+        b.AppendLine("goals=" + string.Join(",", goalIds.ToArray()));
+        foreach (Goal g in Goals) g.Write(b);
+        Timer.Write(b);
+        TopGifters.Write(b);
+        TopLikers.Write(b);
         b.AppendLine("tiktok.user=" + TikTokUser);
         b.AppendLine("tiktok.apiKey=" + TikTokKey);
         b.AppendLine("tiktok.autoConnect=" + AutoConnect);
@@ -764,6 +807,7 @@ public class App : ApplicationContext
 
     public GiftEngine Engine;
     public TikTokLive TikTok;
+    public Widgets W;
     readonly List<string> log = new List<string>();
 
     volatile string stateJson = "{}";
@@ -801,23 +845,29 @@ public class App : ApplicationContext
         AppIcon = AppIcons.Full();
         saveTimer.Interval = 400;
         saveTimer.Tick += delegate { SaveNow(); };
-        SystemEvents.SessionEnding += delegate { SaveNow(); };   // Windows shuts down / signs out
-        Application.ApplicationExit += delegate { SaveNow(); };
+        SystemEvents.SessionEnding += delegate { SaveNow(); if (W != null) W.Shutdown(); };   // Windows shuts down / signs out
+        Application.ApplicationExit += delegate { SaveNow(); if (W != null) W.SaveAll(); };
 
         S = Settings.Load(SettingsFile);
         L.Use(L.Resolve(S.Language));
+        // widget titles that were never set start in the user's language
+        if (S.Timer.Title == null) S.Timer.Title = L.T("Subathon");
+        if (S.TopGifters.Title == null) S.TopGifters.Title = S.TopGifters.DefaultTitle;
+        if (S.TopLikers.Title == null) S.TopLikers.Title = S.TopLikers.DefaultTitle;
+        GiftRule.CounterName = delegate (int id) { Counter c = S.Find(id); return c != null ? c.DisplayName : L.T("(counter removed)"); };
         Diag.Attach(this);
         Diag.SetVerbose(S.Debug);
         LoadCounts();
         S.Save(SettingsFile);
         SaveCounts();
+
+        Engine = new GiftEngine(this);
+        W = new Widgets(this);
+        TikTok = new TikTokLive(this);
         BuildState();
 
         server = new OverlayServer(S.Port, this);
         ServerError = server.Start();
-
-        Engine = new GiftEngine(this);
-        TikTok = new TikTokLive(this);
 
         BuildTray();
         hookProc = OnKey;
@@ -1011,11 +1061,91 @@ public class App : ApplicationContext
         Raise(ActionsToggled);
     }
 
-    int NextRuleId()
+    public int NextRuleId()
     {
         int id = 0;
         foreach (GiftRule o in S.Rules) id = Math.Max(id, o.Id);
         return id + 1;
+    }
+
+    // ---------------- profiles (which topics are on) ----------------
+
+    // Turns on the profile's topics and turns the others off.
+    public void ApplyProfile(Profile p)
+    {
+        foreach (RuleGroup g in S.Groups) g.Enabled = p.On.Contains(g.Id);
+        ApplySettings();
+        Log(L.F("Profile \"{0}\": its topics are on, the others off.", p.Name));
+    }
+
+    // Saves which topics are on now under this name (a profile with the same name is replaced).
+    public Profile SaveProfile(string name)
+    {
+        Profile p = S.Profiles.Find(delegate (Profile o) { return string.Equals(o.Name, name, StringComparison.CurrentCultureIgnoreCase); });
+        if (p == null)
+        {
+            if (S.Profiles.Count >= 50) return null;
+            p = new Profile();
+            foreach (Profile o in S.Profiles) p.Id = Math.Max(p.Id, o.Id);
+            p.Id++;
+            S.Profiles.Add(p);
+        }
+        p.Name = name;
+        p.On.Clear();
+        foreach (RuleGroup g in S.Groups) if (g.Enabled) p.On.Add(g.Id);
+        ApplySettings();
+        return p;
+    }
+
+    public void DeleteProfile(Profile p)
+    {
+        S.Profiles.Remove(p);
+        ApplySettings();
+    }
+
+    // ---------------- widgets ----------------
+
+    public Goal AddGoal()
+    {
+        if (S.Goals.Count >= Settings.MaxGoals) return null;
+        Goal g = new Goal();
+        foreach (Goal o in S.Goals) g.Id = Math.Max(g.Id, o.Id);
+        g.Id++;
+        g.Title = Goal.DefaultTitle(g.Source);
+        S.Goals.Add(g);
+        ApplySettings();
+        return g;
+    }
+
+    public void RemoveGoal(Goal g)
+    {
+        S.Goals.Remove(g);
+        ApplySettings();
+    }
+
+    // The overlay state again (widgets call this, bundled, after events).
+    public void RefreshState() { BuildState(); }
+
+    public void CopyText(string text)
+    {
+        try { Clipboard.SetText(text); } catch { }
+    }
+
+    // Opens an overlay (view = null: the counters; else a widget, e.g. "goal:1") in the normal web
+    // browser, on a grey background, to see how it looks without LIVE Studio.
+    public void OpenPreview(string view, string name)
+    {
+        try
+        {
+            string dir = Path.Combine(Folder, "preview");
+            Directory.CreateDirectory(dir);
+            string file = Path.Combine(dir, (view ?? "counters").Replace(':', '-') + ".html");
+            string html = Overlay.ViewHtml(S.Port, view, name)
+                .Replace("background:transparent}</style>", "background:transparent}html,body{background:#3a3d45!important}</style>");
+            File.WriteAllText(file, html, new UTF8Encoding(false));
+            Process.Start(file);
+        }
+        catch (Exception ex) { Log(L.F("Couldn't open the preview: {0}", ex.Message)); }
     }
 
     // New action at the end of a topic (shown open, so it can be filled in right away).
@@ -1106,7 +1236,7 @@ public class App : ApplicationContext
 
     void Raise(EventHandler h) { if (h != null) h(this, EventArgs.Empty); }
 
-    static string Js(string s)
+    public static string Js(string s)
     {
         StringBuilder b = new StringBuilder("\"");
         foreach (char c in s ?? "")
@@ -1148,7 +1278,9 @@ public class App : ApplicationContext
              .Append(",\"flash\":").Append(Js(Settings.ToHex(st.FlashColor)))
              .Append('}');
         }
-        b.Append("]}");
+        b.Append(']');
+        if (W != null) W.AppendState(b);   // goals, timer, top lists (Widgets.cs)
+        b.Append('}');
         stateJson = b.ToString();
         stateBytes = Encoding.UTF8.GetBytes(stateJson);   // the overlay asks ~7 times a second; encode once per change
         firstCount = S.Counters.Count > 0 ? S.Counters[0].Count : 0;
@@ -1387,6 +1519,7 @@ public class App : ApplicationContext
         settingsDirty = countsDirty = false;
         S.Save(SettingsFile);
         SaveCounts();
+        W.Shutdown();
         if (hook != IntPtr.Zero) { UnhookWindowsHookEx(hook); hook = IntPtr.Zero; }
         TikTok.Stop();
         Engine.Clear();
@@ -1405,7 +1538,7 @@ public class App : ApplicationContext
 public static class Overlay
 {
     // Bump this when Script() changes: open overlays notice and reload the new script by themselves.
-    public const string Version = "4.0";
+    public const string Version = "5.0";
 
     // Tiny page packed into a "data:" link so LIVE Studio can always load it (even when the app is
     // closed). It keeps trying to load the real overlay script from the app.
@@ -1422,12 +1555,32 @@ public static class Overlay
             "dcBoot();</script><!--";   // LIVE Studio adds "?winName=..." to the link; this hides it
     }
 
+    // The same tiny page for one widget (view "goal:<id>", "timer", "top:gifters", "top:likers"),
+    // so each widget is its own Link source that can be placed anywhere. view null = the counters.
+    // name: a plain word for the title ("goal", "timer", "top").
+    public static string ViewHtml(int port, string view, string name)
+    {
+        if (view == null) return Html(port);
+        return
+            "<!doctype html><html><head><meta charset=utf-8><title>ClutchKit " + name + " overlay.html</title>" +
+            "<style>html,body{margin:0;height:100%;overflow:hidden;background:transparent}</style></head><body><script>" +
+            "window.DC_BASE='http://127.0.0.1:" + port + "';window.DC_VIEW='" + view + "';" +
+            "window.dcBoot=function(){fetch(DC_BASE+'/overlay.js',{cache:'no-store'}).then(function(r){if(!r.ok)throw 0;return r.text()})" +
+            ".then(function(t){(new Function(t))()}).catch(function(){setTimeout(dcBoot,1000)})};" +
+            "window.dcReload=function(){document.body.innerHTML='';var s=document.getElementById('dcstyle');if(s)s.parentNode.removeChild(s);setTimeout(dcBoot,200)};" +
+            "dcBoot();</script><!--";
+    }
+
+    public static string ViewLink(int port, string view, string name) { return Encode(ViewHtml(port, view, name)); }
+
     // LIVE Studio rules for Link sources: the link must contain "http(s)://" (or it gets
     // "https://" stuck in front) and a "name.letters" part (the "overlay.html" in the title).
-    public static string Link(int port)
+    public static string Link(int port) { return Encode(Html(port)); }
+
+    static string Encode(string html)
     {
         StringBuilder sb = new StringBuilder("data:text/html,");
-        foreach (char c in Html(port))
+        foreach (char c in html)
         {
             switch (c)
             {
@@ -1454,6 +1607,7 @@ public static class Overlay
         return
             "(function(){" +
             "var V='" + Version + "',B=window.DC_BASE||'http://127.0.0.1:8787';" +
+            "if(window.DC_VIEW){" + WidgetScript() + "return}" +
             "var css='html,body{margin:0;height:100%;overflow:hidden;background:transparent}" +
             "body{display:flex;align-items:center;justify-content:center}" +
             "#dcw{display:flex;flex-direction:column;align-items:center;gap:.08em;line-height:1.15;font-size:100px;visibility:hidden}" +
@@ -1495,6 +1649,57 @@ public static class Overlay
             "}).catch(function(){setTimeout(tick,1000)})}" +
             "addEventListener('resize',fit);tick();" +
             "})();";
+    }
+
+    // One widget (window.DC_VIEW): a goal bar, the subathon timer or a top list. It uses the font
+    // and colors of the first counter ("look" in /api/state) and scales to fit the Link source.
+    static string WidgetScript()
+    {
+        return @"
+var VIEW=String(window.DC_VIEW),K=VIEW.split(':')[0],A=VIEW.split(':')[1]||'';
+var st=document.createElement('style');st.id='dcstyle';
+st.textContent='html,body{margin:0;height:100%;overflow:hidden;background:transparent}body{display:flex;align-items:center;justify-content:center}'+
+'#dcv{display:inline-flex;flex-direction:column;align-items:center;font-size:100px;line-height:1.2;white-space:nowrap;visibility:hidden}'+
+'#dcv .t{font-size:.55em}#dcv .n{font-variant-numeric:tabular-nums}#dcv .g{font-size:.75em}'+
+'#dcv .bar{width:8em;height:.45em;border-radius:.225em;background:rgba(0,0,0,.55);box-shadow:0 0 0 .04em rgba(255,255,255,.3);overflow:hidden;margin-top:.12em}'+
+'#dcv .fill{height:100%;width:0;border-radius:.225em;transition:width .6s ease-out}'+
+'#dcv .rows{align-self:stretch;font-size:.6em}#dcv .row{display:flex;justify-content:space-between;gap:1.5em}#dcv .v{font-variant-numeric:tabular-nums}';
+document.head.appendChild(st);
+var w=document.createElement('div');w.id='dcv';document.body.appendChild(w);
+function el(c,p){var e=document.createElement('div');if(c)e.className=c;(p||w).appendChild(e);return e}
+var ti=el('t'),n=el(K==='goal'?'n g':'n'),fill=null,rows=null,cur=null,lookKey='',alive=true;
+if(K==='goal')fill=el('fill',el('bar'));
+if(K==='top'){rows=el('rows');rows.k=null;n.style.display='none'}
+function sh(c){var o=[],q=c.outlineWidth/100;if(q>0){for(var a=0;a<16;a++){var x=Math.cos(a*Math.PI/8)*q,y=Math.sin(a*Math.PI/8)*q;
+o.push(x.toFixed(3)+'em '+y.toFixed(3)+'em 0 '+c.outline)}}if(c.shadow)o.push('0 .08em .25em rgba(0,0,0,.5)');return o.length?o.join(','):'none'}
+function fit(){w.style.fontSize='100px';var a=w.offsetWidth,h=w.offsetHeight;if(!a||!h)return;
+var k=Math.min(innerWidth*0.94/a,innerHeight*0.9/h);w.style.fontSize=Math.max(4,100*k)+'px'}
+function fmt(x){return Number(x).toLocaleString()}
+function clock(ms){var s=Math.max(0,Math.ceil(ms/1000)),h=Math.floor(s/3600),m=Math.floor(s%3600/60),x=s%60;
+return(h>0?h+':'+(m<10?'0':''):'')+m+':'+(x<10?'0':'')+x}
+function pick(s){if(K==='goal'){var g=s.goals||[];for(var i=0;i<g.length;i++)if(String(g[i].id)===A)return g[i];return null}
+if(K==='timer')return s.timer;if(K==='top')return s.top?s.top[A]:null;return null}
+function left(){return !cur?0:cur.state==='run'?cur.ends-Date.now():cur.left}
+function put(e,t){if(e.textContent!==t){e.textContent=t;return true}return false}
+function draw(s){var d=pick(s),L=s.look||{};if(!d||!d.show){w.style.visibility='hidden';cur=null;return}
+var ch=false,k=JSON.stringify(L);
+if(k!==lookKey){lookKey=k;var e=w.style,t=sh(L);e.fontFamily='\''+L.font+'\',\'Segoe UI\',sans-serif';e.fontWeight=L.bold?'900':'400';
+e.fontStyle=L.italic?'italic':'normal';e.color=L.color;ti.style.textShadow=t;n.style.textShadow=t;if(rows)rows.style.textShadow=t;ch=true}
+ch=put(ti,d.title||'')||ch;ti.style.display=d.title?'':'none';
+if(K==='goal'){ch=put(n,fmt(d.value)+' / '+fmt(d.target))||ch;fill.style.background=d.color;
+fill.style.width=(d.target>0?Math.min(100,d.value*100/d.target):100)+'%'}
+else if(K==='timer'){cur=d;ch=put(n,clock(left()))||ch}
+else if(rows){var r=d.rows||[],j=JSON.stringify(r);if(j!==rows.k){rows.k=j;rows.innerHTML='';
+if(!r.length){var z=el('row',rows);z.textContent='-';z.style.justifyContent='center';z.style.opacity='.6'}
+for(var i=0;i<r.length;i++){var o=el('row',rows),a=document.createElement('span'),b=document.createElement('span');
+a.textContent=(i+1)+'. '+r[i][0];b.textContent=fmt(r[i][1]);b.className='v';o.appendChild(a);o.appendChild(b)}ch=true}}
+if(ch)fit();w.style.visibility='visible'}
+setInterval(function(){if(cur&&put(n,clock(left())))fit()},250);
+function tick(){if(!alive)return;fetch(B+'/api/state',{cache:'no-store'}).then(function(r){return r.json()}).then(function(s){
+if(s.overlayVersion!==V){alive=false;if(window.dcReload)window.dcReload();return}
+draw(s);setTimeout(tick,300)}).catch(function(){setTimeout(tick,1000)})}
+addEventListener('resize',fit);tick();
+";
     }
 }
 
@@ -2367,10 +2572,11 @@ public partial class MainForm : Form
         Controls.Add(nav);
         navTop = BuildBrand();
 
-        // Menu order: welcome + language > what you track > what happens on the LIVE > how it gets on stream > app options
+        // Menu order: welcome + language > what you show > what happens on the LIVE > how it gets on stream > app options
         loading = true;
         AddPage(L.T("General"), BuildGeneralPage());
         AddPage(L.T("Counters"), BuildCountersPage());
+        AddPage(L.T("Widgets"), BuildWidgetsPage());
         AddPage(L.T("Actions"), BuildActionsPage());
         AddPage(L.T("TikTok LIVE"), BuildTikTokPage());
         AddPage(L.T("Overlay"), BuildOverlayPage());
@@ -2728,7 +2934,9 @@ public partial class MainForm : Form
         UI.Para(p, L.T("See-through text on stream. In LIVE Studio: Add source > Link > paste the link once. It works no matter if LIVE Studio or ClutchKit starts first, and everything you change here updates on stream automatically."),
                    60, 152, 600, 62);
         Button copy = UI.Btn(p, L.T("Copy LIVE Studio link"), 60, 218, 220, 38, true);
-        Label linkStatus = UI.Para(p, "", 292, 227, 360, 24);
+        Button preview = UI.Btn(p, L.T("Preview"), 288, 218, 120, 38, false);
+        preview.Click += delegate { app.OpenPreview(null, "counters"); };
+        Label linkStatus = UI.Para(p, "", 418, 222, 252, 40);
         copy.Click += delegate { app.CopyLink(); linkStatus.Text = L.T("Copied! Paste it in LIVE Studio with Ctrl+V."); linkStatus.ForeColor = UI.Good; };
 
         windowRadio = new RadioButton();
@@ -2810,6 +3018,7 @@ public partial class MainForm : Form
     {
         app.CountChanged -= OnCount;
         app.SettingsChanged -= OnSettings;
+        app.W.Changed -= OnWidgetsChanged;
         UnhookActionPages();
         if (debugTimer != null) debugTimer.Dispose();
         base.OnFormClosed(e);

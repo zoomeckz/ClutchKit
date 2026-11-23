@@ -1,9 +1,10 @@
-// ClutchKit - the "Gift actions" and "TikTok LIVE" pages of the settings window.
+// ClutchKit - the "Actions" and "TikTok LIVE" pages of the settings window.
 
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
+using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
@@ -18,21 +19,21 @@ public partial class MainForm
     readonly List<ListBox> logBoxes = new List<ListBox>();
     readonly List<Timer> testTimers = new List<Timer>();
 
-    // key capture for gift action keys and the on/off key
+    // key capture for action keys and the on/off key
     Button keyCapBtn;
     Action<Hotkey> keyCapSet;
     Func<Hotkey> keyCapGet;
     bool keyCapIsPauseKey;
 
-    // ---------------- Gift actions ----------------
+    // ---------------- Actions ----------------
 
     Panel BuildActionsPage()
     {
-        Panel p = NewPage("Gift actions", "When a viewer sends a gift, ClutchKit presses keys in your game - or types text, like a Minecraft command. " +
-                                          "Gifts come in through the TikTok LIVE page.");
+        Panel p = NewPage("Actions", "When something happens on your LIVE - a gift, a follow, a share, a viewer joining, likes - ClutchKit can " +
+                                     "play a sound, press keys in your game or type text (like a Minecraft command).");
         Settings s = app.S;
 
-        actionsOnBox = UI.Check(p, "Gift actions on", 38, 124, s.ActionsOn);
+        actionsOnBox = UI.Check(p, "Actions on", 38, 124, s.ActionsOn);
         actionsOnBox.Font = UI.F(11f, FontStyle.Bold);
         actionsOnBox.CheckedChanged += delegate { if (!loading) app.SetActionsOn(actionsOnBox.Checked); };
         UI.Lbl(p, "On/off key", 250, 128, 100, 10f, UI.Muted, FontStyle.Regular);
@@ -42,7 +43,7 @@ public partial class MainForm
         {
             StartKeyCapture(pauseKeyBtn, delegate { return app.S.PauseKey; }, delegate (Hotkey hk) { app.S.PauseKey = hk; }, true);
         };
-        UI.Para(p, "Turn gift actions off fast, e.g. when you're in a menu.", 520, 118, 150, 44);
+        UI.Para(p, "Turn actions off fast, e.g. when you're in a menu.", 520, 118, 150, 44);
 
         UI.FieldLabel(p, "Only press keys in", 38, 170);
         ComboBox only = UI.Combo(p, 190, 170, 220);
@@ -50,56 +51,65 @@ public partial class MainForm
         only.Text = s.OnlyProcess;
         only.DropDown += delegate { FillPrograms(only); };
         only.TextChanged += delegate { app.S.OnlyProcess = KeySender.CleanProcessName(only.Text); Changed(); };
-        UI.Para(p, "Pick your game, so gifts never type into chat or Discord. Empty = whatever is in front.", 420, 166, 250, 44);
+        UI.Para(p, "Pick your game, so keys never go into chat or Discord. Empty = whatever is in front. (Sounds always play.)", 420, 166, 250, 60);
 
-        queueLbl = UI.Para(p, "", 38, 222, 200, 24);
-        Button clear = UI.Btn(p, "Clear queue", 240, 216, 130, 32, false);
-        clear.Click += delegate { app.Engine.Clear(); app.Log("Queue cleared."); };
-        UI.Lbl(p, "Wait between actions (ms)", 390, 222, 190, 10f, UI.Muted, FontStyle.Regular);
-        NumericUpDown gap = UI.Number(p, 580, 216, 0, 5000, s.GapMs, 10);
+        queueLbl = UI.Para(p, "", 38, 230, 200, 24);
+        Button clear = UI.Btn(p, "Stop and clear", 240, 224, 140, 32, false);
+        clear.Click += delegate { app.Engine.Clear(); app.Log("Stopped the sound and cleared the queue."); };
+        UI.Lbl(p, "Wait between key actions (ms)", 390, 230, 190, 10f, UI.Muted, FontStyle.Regular);
+        NumericUpDown gap = UI.Number(p, 590, 224, 0, 5000, s.GapMs, 10);
         gap.Size = new Size(UI.D(80), UI.D(30));
         gap.ValueChanged += delegate { app.S.GapMs = (int)gap.Value; Changed(); };
 
-        elevLbl = UI.Para(p, "", 38, 258, 420, 44);
+        elevLbl = UI.Para(p, "", 38, 266, 420, 44);
         elevLbl.ForeColor = UI.Warn;
-        elevBtn = UI.Btn(p, "Restart as administrator", 470, 262, 200, 36, false);
+        elevBtn = UI.Btn(p, "Restart as administrator", 470, 270, 200, 36, false);
         elevBtn.Click += delegate { app.RestartAsAdmin(); };
         ShowElevation(null);
 
-        // test gift
-        UI.Lbl(p, "Test with a fake gift", 38, 312, 300, 11f, UI.Text, FontStyle.Bold);
-        ComboBox testGift = GiftCombo(p, 38, 344, 180);
+        // test event
+        UI.Lbl(p, "Test with a fake event", 38, 316, 300, 11f, UI.Text, FontStyle.Bold);
+        ComboBox testType = UI.Combo(p, 38, 348, 120);
+        testType.Items.AddRange(GiftRule.TriggerNames);
+        testType.SelectedIndex = 0;
+        ComboBox testGift = GiftCombo(p, 166, 348, 140);
         testGift.Text = "Rose";
-        UI.Lbl(p, "x", 226, 348, 16, 10f, UI.Muted, FontStyle.Regular);
-        NumericUpDown testCount = UI.Number(p, 244, 344, 1, 999, 1, 1);
-        testCount.Size = new Size(UI.D(70), UI.D(30));
-        UI.Lbl(p, "coins each", 322, 348, 80, 10f, UI.Muted, FontStyle.Regular);
-        NumericUpDown testCoins = UI.Number(p, 404, 344, 0, 100000, 1, 1);
-        testCoins.Size = new Size(UI.D(80), UI.D(30));
-        Button sendTest = UI.Btn(p, "Send in 3 s", 500, 340, 170, 38, true);
+        Label testX = UI.Lbl(p, "x", 312, 352, 16, 10f, UI.Muted, FontStyle.Regular);
+        NumericUpDown testCount = UI.Number(p, 330, 348, 1, 100000, 1, 1);
+        testCount.Size = new Size(UI.D(64), UI.D(30));
+        Label testCoinsLbl = UI.Lbl(p, "coins", 400, 352, 48, 10f, UI.Muted, FontStyle.Regular);
+        NumericUpDown testCoins = UI.Number(p, 450, 348, 0, 100000, 1, 1);
+        testCoins.Size = new Size(UI.D(70), UI.D(30));
+        MethodInvoker testLayout = delegate
+        {
+            string type = GiftRule.Triggers[testType.SelectedIndex];
+            bool gift = type == LiveEvent.Gift, likes = type == LiveEvent.Likes;
+            testGift.Visible = testCoinsLbl.Visible = testCoins.Visible = gift;
+            testX.Visible = testCount.Visible = gift || likes;
+            if (likes && testCount.Value < 10) testCount.Value = 100;
+        };
+        testType.SelectedIndexChanged += delegate { testLayout(); };
+        testLayout();
+        Button sendTest = UI.Btn(p, "Send in 3 s", 530, 344, 140, 38, true);
         sendTest.Click += delegate
         {
-            string name = testGift.Text.Trim();
-            int count = (int)testCount.Value, coins = (int)testCoins.Value;
-            Countdown(sendTest, "Send in 3 s", delegate
-            {
-                GiftEvent g = new GiftEvent();
-                g.Test = true;
-                g.User = "test_viewer";
-                g.GiftName = name;
-                g.RepeatCount = count;
-                g.Coins = coins;
-                app.Engine.OnGift(g);
-            });
+            LiveEvent e = new LiveEvent();
+            e.Test = true;
+            e.Type = GiftRule.Triggers[testType.SelectedIndex];
+            e.User = "test_viewer";
+            e.GiftName = testGift.Text.Trim();
+            e.RepeatCount = (int)testCount.Value;
+            e.Coins = (int)testCoins.Value;
+            Countdown(sendTest, "Send in 3 s", delegate { app.Engine.OnEvent(e); });
         };
-        UI.Para(p, "Acts exactly like a real gift. Click into your game during the countdown.", 38, 382, 620, 24);
+        UI.Para(p, "Acts exactly like the real thing. Click into your game during the countdown.", 38, 386, 620, 24);
 
         // rules
-        UI.Lbl(p, "Your gift actions", 38, 420, 300, 11f, UI.Text, FontStyle.Bold);
-        actionsMsg = UI.Para(p, "Click a key button, then press the key (Esc = cancel).", 38, 448, 620, 24);
+        UI.Lbl(p, "Your actions", 38, 424, 300, 11f, UI.Text, FontStyle.Bold);
+        actionsMsg = UI.Para(p, "Click a key button, then press the key (Esc = cancel).", 38, 452, 620, 24);
         rulesHost = new Panel();
         rulesHost.BackColor = UI.Bg;
-        rulesHost.Location = new Point(UI.D(38), UI.D(478));
+        rulesHost.Location = new Point(UI.D(38), UI.D(482));
         rulesHost.Width = UI.D(632);
         p.Controls.Add(rulesHost);
         RebuildRules();
@@ -127,13 +137,13 @@ public partial class MainForm
         }
         if (app.S.Rules.Count < Settings.MaxRules)
         {
-            Button add = UI.Btn(rulesHost, "+  Add gift action", 0, 0, 220, 40, true);
+            Button add = UI.Btn(rulesHost, "+  Add action", 0, 0, 220, 40, true);
             add.Location = new Point(0, y);
             add.Click += delegate
             {
                 GiftRule r = app.AddRule();
                 RebuildRules();
-                if (r != null) ActionsMessage("Added. Type the gift's name and pick the key it should press.", UI.Good);
+                if (r != null) ActionsMessage("Added. Choose what triggers it (e.g. a Rose) and what it does.", UI.Good);
             };
             y += add.Height + UI.D(16);
         }
@@ -153,22 +163,23 @@ public partial class MainForm
         card.BackColor = UI.Card;
         card.Size = new Size(UI.D(632), UI.D(156));
 
-        // row 1: which gift
+        // row 1: what triggers it
         CheckBox on = UI.Check(card, "On", 16, 18, r.Enabled);
         on.BackColor = UI.Card;
         on.CheckedChanged += delegate { r.Enabled = on.Checked; Changed(); };
-        UI.Lbl(card, "Gift", 76, 18, 40, 10f, UI.Muted, FontStyle.Regular);
-        ComboBox gift = GiftCombo(card, 116, 14, 220);
+        ComboBox trigger = UI.Combo(card, 70, 14, 130);
+        trigger.Items.AddRange(GiftRule.TriggerNames);
+        trigger.SelectedIndex = Math.Max(0, Array.IndexOf(GiftRule.Triggers, r.Trigger));
+        ComboBox gift = GiftCombo(card, 208, 14, 170);
         gift.Text = r.Gifts;
         gift.TextChanged += delegate { r.Gifts = gift.Text.Trim(); Changed(); };
-        UI.Lbl(card, "min. coins", 346, 18, 80, 10f, UI.Muted, FontStyle.Regular);
-        NumericUpDown coins = UI.Number(card, 426, 14, 0, 1000000, r.MinCoins, 1);
-        coins.Size = new Size(UI.D(80), UI.D(30));
-        coins.ValueChanged += delegate { r.MinCoins = (int)coins.Value; Changed(); };
-        Button remove = UI.Btn(card, "Remove", 528, 12, 88, 34, false);
+        Label amountLbl = UI.Lbl(card, "", 386, 18, 80, 10f, UI.Muted, FontStyle.Regular);
+        NumericUpDown amount = UI.Number(card, 466, 14, 0, 10000000, 0, 1);
+        amount.Size = new Size(UI.D(66), UI.D(30));
+        Button remove = UI.Btn(card, "Remove", 540, 12, 76, 34, false);
         remove.Click += delegate
         {
-            if (MessageBox.Show(this, "Remove the gift action for \"" + r.TriggerText + "\"?", "ClutchKit",
+            if (MessageBox.Show(this, "Remove the action for \"" + r.TriggerText + "\"?", "ClutchKit",
                     MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
             app.RemoveRule(r);
             RebuildRules();
@@ -177,7 +188,7 @@ public partial class MainForm
         // row 2: what it does
         ComboBox kind = UI.Combo(card, 16, 60, 140);
         kind.Items.AddRange(GiftRule.KindNames);
-        kind.SelectedIndex = r.Kind == GiftRule.KindText ? 1 : 0;
+        kind.SelectedIndex = Math.Max(0, Array.IndexOf(GiftRule.Kinds, r.Kind));
         Button key = UI.Btn(card, "", 166, 58, 160, 34, false);
         key.BackColor = UI.Input;
         Label holdLbl = UI.Lbl(card, "hold (ms)", 340, 64, 80, 10f, UI.Muted, FontStyle.Regular);
@@ -195,18 +206,71 @@ public partial class MainForm
         CheckBox enter = UI.Check(card, "+ Enter", 540, 64, r.Enter);
         enter.BackColor = UI.Card;
         enter.CheckedChanged += delegate { r.Enter = enter.Checked; Changed(); };
+        TextBox sound = new TextBox();
+        UI.Style(sound);
+        sound.BorderStyle = BorderStyle.FixedSingle;
+        sound.ReadOnly = true;
+        sound.Location = new Point(UI.D(166), UI.D(62));
+        sound.Size = new Size(UI.D(236), UI.D(28));
+        card.Controls.Add(sound);
+        Button browse = UI.Btn(card, "Browse...", 408, 58, 90, 34, false);
+        Label volLbl = UI.Lbl(card, "volume", 506, 64, 56, 10f, UI.Muted, FontStyle.Regular);
+        NumericUpDown vol = UI.Number(card, 562, 60, 0, 100, r.Volume, 5);
+        vol.Size = new Size(UI.D(56), UI.D(30));
+        vol.ValueChanged += delegate { r.Volume = (int)vol.Value; Changed(); };
 
+        // row 3: how often, test
+        UI.Lbl(card, "Times", 16, 110, 50, 10f, UI.Muted, FontStyle.Regular);
+        NumericUpDown times = UI.Number(card, 66, 106, 1, 100, r.Times, 1);
+        times.Size = new Size(UI.D(60), UI.D(30));
+        times.ValueChanged += delegate { r.Times = (int)times.Value; Changed(); };
+        UI.Lbl(card, "cooldown (s)", 136, 110, 96, 10f, UI.Muted, FontStyle.Regular);
+        NumericUpDown cooldown = UI.Number(card, 232, 106, 0, 3600, r.CooldownSec, 1);
+        cooldown.Size = new Size(UI.D(64), UI.D(30));
+        cooldown.ValueChanged += delegate { r.CooldownSec = (int)cooldown.Value; Changed(); };
+        CheckBox perGift = UI.Check(card, "Every gift in a combo", 308, 110, r.PerGift);
+        perGift.BackColor = UI.Card;
+        perGift.CheckedChanged += delegate { r.PerGift = perGift.Checked; Changed(); };
+        Button test = UI.Btn(card, "Test", 500, 104, 116, 36, false);
+
+        bool building = true;
         MethodInvoker layout = delegate
         {
-            bool isText = r.Kind == GiftRule.KindText;
-            holdLbl.Visible = hold.Visible = !isText;
+            bool isGift = r.Trigger == LiveEvent.Gift, isLikes = r.Trigger == LiveEvent.Likes;
+            bool isText = r.Kind == GiftRule.KindText, isSound = r.Kind == GiftRule.KindSound;
+            gift.Visible = isGift;
+            amountLbl.Visible = amount.Visible = isGift || isLikes;
+            amountLbl.Text = isLikes ? "every (likes)" : "min. coins";
+            building = true;
+            amount.Minimum = isLikes ? 1 : 0;
+            amount.Value = Math.Max(amount.Minimum, Math.Min(amount.Maximum, isLikes ? r.EveryLikes : r.MinCoins));
+            building = false;
+            key.Visible = !isSound;
+            holdLbl.Visible = hold.Visible = !isText && !isSound;
             text.Visible = enter.Visible = isText;
+            sound.Visible = browse.Visible = volLbl.Visible = vol.Visible = isSound;
+            sound.Text = r.SoundFile.Length > 0 ? Path.GetFileName(r.SoundFile) : "(no sound picked)";
+            perGift.Visible = isGift && !isSound;   // sounds play once per gift send
             if (key != keyCapBtn) key.Text = isText ? (r.Key.IsSet ? "First: " + r.Key : "First: no key") : r.Key.ToString();
             key.ForeColor = r.Key.IsSet ? UI.Text : UI.Muted;
+            test.Text = isSound ? "Test" : "Test in 3 s";
+        };
+        amount.ValueChanged += delegate
+        {
+            if (building) return;
+            if (r.Trigger == LiveEvent.Likes) r.EveryLikes = (int)amount.Value; else r.MinCoins = (int)amount.Value;
+            Changed();
+        };
+        trigger.SelectedIndexChanged += delegate
+        {
+            r.Trigger = GiftRule.Triggers[trigger.SelectedIndex];
+            if (r.Trigger == LiveEvent.Join && r.CooldownSec == 0) cooldown.Value = 10;   // joins come fast in busy rooms
+            layout();
+            Changed();
         };
         kind.SelectedIndexChanged += delegate
         {
-            r.Kind = kind.SelectedIndex == 1 ? GiftRule.KindText : GiftRule.KindKey;
+            r.Kind = GiftRule.Kinds[kind.SelectedIndex];
             layout();
             Changed();
         };
@@ -216,26 +280,61 @@ public partial class MainForm
             if (keyCapBtn == key)
                 ActionsMessage(r.Kind == GiftRule.KindText
                     ? "Press the key that opens the chat first (e.g. T in Minecraft), or Backspace for none. Esc = cancel."
-                    : "Press the key the gift should press in your game (Backspace = no key, Esc = cancel).", UI.Warn);
+                    : "Press the key it should press in your game (Backspace = no key, Esc = cancel).", UI.Warn);
         };
-        layout();
-
-        // row 3: how often, test
-        UI.Lbl(card, "Times", 16, 110, 50, 10f, UI.Muted, FontStyle.Regular);
-        NumericUpDown times = UI.Number(card, 70, 106, 1, 100, r.Times, 1);
-        times.Size = new Size(UI.D(70), UI.D(30));
-        times.ValueChanged += delegate { r.Times = (int)times.Value; Changed(); };
-        CheckBox perGift = UI.Check(card, "For every gift in a combo (x10 = 10 times)", 156, 110, r.PerGift);
-        perGift.BackColor = UI.Card;
-        perGift.CheckedChanged += delegate { r.PerGift = perGift.Checked; Changed(); };
-        Button test = UI.Btn(card, "Test in 3 s", 480, 104, 136, 36, false);
+        browse.Click += delegate
+        {
+            string picked = PickSound(r.SoundFile);
+            if (picked == null) return;
+            r.SoundFile = picked;
+            layout();
+            Changed();
+            app.Engine.RunTest(r);   // play it once so you hear what you picked
+        };
         test.Click += delegate
         {
-            if (!r.CanRun) { ActionsMessage(r.Kind == GiftRule.KindText ? "Type the text first." : "Pick a key first.", UI.Warn); return; }
+            if (!r.CanRun)
+            {
+                ActionsMessage(r.Kind == GiftRule.KindText ? "Type the text first." : r.Kind == GiftRule.KindSound ? "Pick a sound first." : "Pick a key first.", UI.Warn);
+                return;
+            }
+            if (r.Kind == GiftRule.KindSound) { app.Engine.RunTest(r); return; }
             Countdown(test, "Test in 3 s", delegate { app.Engine.RunTest(r); });
             ActionsMessage("Click into your game now - it runs in 3 seconds.", UI.Warn);
         };
+        layout();
         return card;
+    }
+
+    // Lets you pick a sound file and copies it into ClutchKit's "sounds" folder, so the action keeps
+    // working if the original file is moved or deleted. Returns the copy's path, or null.
+    string PickSound(string current)
+    {
+        using (OpenFileDialog d = new OpenFileDialog())
+        {
+            d.Title = "Pick a sound";
+            d.Filter = "Sounds (*.mp3, *.wav, *.wma, *.m4a, *.aac)|*.mp3;*.wav;*.wma;*.m4a;*.aac|All files|*.*";
+            string soundsDir = Path.Combine(app.Folder, "sounds");
+            try { d.InitialDirectory = current.Length > 0 && File.Exists(current) ? Path.GetDirectoryName(current) : Environment.GetFolderPath(Environment.SpecialFolder.MyMusic); }
+            catch { }
+            if (d.ShowDialog(this) != DialogResult.OK) return null;
+            try
+            {
+                Directory.CreateDirectory(soundsDir);
+                string src = Path.GetFullPath(d.FileName);
+                if (src.StartsWith(Path.GetFullPath(soundsDir) + "\\", StringComparison.OrdinalIgnoreCase)) return src;
+                string dest = Path.Combine(soundsDir, Path.GetFileName(src));
+                if (File.Exists(dest) && new FileInfo(dest).Length != new FileInfo(src).Length)
+                    dest = Path.Combine(soundsDir, Path.GetFileNameWithoutExtension(src) + "-" + DateTime.Now.ToString("HHmmss") + Path.GetExtension(src));
+                File.Copy(src, dest, true);
+                return dest;
+            }
+            catch (Exception ex)
+            {
+                ActionsMessage("Couldn't copy the sound (" + ex.Message + "), using it from where it is.", UI.Warn);
+                return d.FileName;
+            }
+        }
     }
 
     ComboBox GiftCombo(Control parent, int x, int y, int w)
@@ -317,7 +416,7 @@ public partial class MainForm
         elevLbl.Visible = elevBtn.Visible = show;
     }
 
-    // ---------------- key capture (gift actions) ----------------
+    // ---------------- key capture (action keys) ----------------
 
     void StartKeyCapture(Button b, Func<Hotkey> get, Action<Hotkey> set, bool isPauseKey)
     {
@@ -383,8 +482,8 @@ public partial class MainForm
 
     Panel BuildTikTokPage()
     {
-        Panel p = NewPage("TikTok LIVE", "Connect to your LIVE so gifts can trigger your gift actions. TikTok has no official way to do this, " +
-                                         "so ClutchKit uses Euler Stream (free account) to read the gifts.");
+        Panel p = NewPage("TikTok LIVE", "Connect to your LIVE so gifts, follows, shares, joins and likes can trigger your actions. TikTok has no " +
+                                         "official way to do this, so ClutchKit uses Euler Stream (free account) to read them.");
         Settings s = app.S;
 
         UI.FieldLabel(p, "Your TikTok username", 38, 126);

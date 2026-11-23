@@ -1,4 +1,4 @@
-// ClutchKit - TikTok LIVE connection: reads gifts from your LIVE so they can trigger gift actions.
+// ClutchKit - TikTok LIVE connection: reads gifts, follows, shares, joins and likes from your LIVE so they can trigger actions.
 // ----------------------------------------------------------------------------------
 // TikTok has no official API for LIVE events. ClutchKit uses Euler Stream's WebSocket service
 // (wss://ws.eulerstream.com, free account + API key), which connects to TikTok and passes the
@@ -195,7 +195,7 @@ public class TikTokLive
                 {
                     // the first message means TikTok is really connected (not live = closed right away instead)
                     gotData = true;
-                    Report(State.Connected, "Connected - listening for gifts on @" + user + "'s LIVE.");
+                    Report(State.Connected, "Connected - listening to @" + user + "'s LIVE.");
                     app.Log("TikTok LIVE: connected to @" + user + ".");
                 }
                 Handle(data);
@@ -279,12 +279,20 @@ public class TikTokLive
         switch (type)
         {
             case "WebcastGiftMessage":
-                GiftEvent g = ParseGift(data);
-                app.Ui(delegate { app.Engine.OnGift(g); });
+                Send(ParseGift(data));
+                break;
+            case "WebcastSocialMessage":
+                Send(ParseSocial(data));
+                break;
+            case "WebcastMemberMessage":
+                Send(ParseJoin(data));
+                break;
+            case "WebcastLikeMessage":
+                Send(ParseLikes(data));
                 break;
             case "room.status":
                 string state = Str(data, "state");
-                if (state == "connected") Report(State.Connected, "Connected - listening for gifts on @" + User + "'s LIVE.");
+                if (state == "connected") Report(State.Connected, "Connected - listening to @" + User + "'s LIVE.");
                 else if (state == "offline" || state == "ended") Report(State.Waiting, "@" + User + "'s LIVE is " + state + ".");
                 else if (state == "reconnecting") Report(State.Connecting, "Euler Stream is reconnecting to TikTok...");
                 else if (state == "error" && Str(data, "message").Length > 0) app.Log("TikTok LIVE: " + Str(data, "message"));
@@ -299,9 +307,9 @@ public class TikTokLive
     }
 
     // Reads a gift in any of Euler Stream's schema versions (v1 "giftDetails", v2/v3 "gift").
-    public static GiftEvent ParseGift(Dictionary<string, object> data)
+    public static LiveEvent ParseGift(Dictionary<string, object> data)
     {
-        GiftEvent g = new GiftEvent();
+        LiveEvent g = new LiveEvent();
         Dictionary<string, object> details = Obj(data, "giftDetails"), gift = Obj(data, "gift"), user = Obj(data, "user");
         g.GiftName = First(Str(details, "giftName"), Str(gift, "name"), Str(details, "describe"));
         g.Coins = (int)First(Num(details, "diamondCount"), Num(gift, "diamondCount"));
@@ -315,6 +323,51 @@ public class TikTokLive
         g.Nick = Str(user, "nickname");
         g.UserId = First(Str(user, "userId"), Str(user, "id"));
         return g;
+    }
+
+    void Send(LiveEvent e)
+    {
+        if (e != null) app.Ui(delegate { app.Engine.OnEvent(e); });
+    }
+
+    static LiveEvent WithUser(Dictionary<string, object> data, string type)
+    {
+        LiveEvent e = new LiveEvent();
+        e.Type = type;
+        Dictionary<string, object> user = Obj(data, "user");
+        e.User = First(Str(user, "uniqueId"), Str(user, "displayId"));
+        e.Nick = Str(user, "nickname");
+        e.UserId = First(Str(user, "userId"), Str(user, "id"));
+        return e;
+    }
+
+    // Follow or share (both arrive as a "social" message; the display type tells them apart).
+    public static LiveEvent ParseSocial(Dictionary<string, object> data)
+    {
+        Dictionary<string, object> common = Obj(data, "common"), shown = Obj(common, "displayText");
+        string hint = (Str(Obj(Obj(data, "event"), "eventDetails"), "displayType") + " " + Str(shown, "key") + " " +
+                       Str(shown, "defaultPattern") + " " + Str(data, "action")).ToLowerInvariant();
+        if (hint.Contains("follow") || (Num(data, "followCount") > 0 && Num(data, "shareCount") == 0 && Str(data, "shareType").Length == 0))
+            return WithUser(data, LiveEvent.Follow);
+        if (hint.Contains("share") || Num(data, "shareCount") > 0 || Str(data, "shareType").Length > 0)
+            return WithUser(data, LiveEvent.Share);
+        return null;
+    }
+
+    // Someone joined the LIVE (member messages with other actions are ignored).
+    public static LiveEvent ParseJoin(Dictionary<string, object> data)
+    {
+        long actionId = Num(data, "actionId");
+        string action = Str(data, "action");
+        bool join = actionId <= 1 && (action.Length == 0 || action == "0" || action == "1" || action.ToUpperInvariant().Contains("JOIN"));
+        return join ? WithUser(data, LiveEvent.Join) : null;
+    }
+
+    public static LiveEvent ParseLikes(Dictionary<string, object> data)
+    {
+        LiveEvent e = WithUser(data, LiveEvent.Likes);
+        e.RepeatCount = (int)Math.Max(1, Math.Min(100000, First(Num(data, "likeCount"), Num(data, "count"))));
+        return e;
     }
 
     static Dictionary<string, object> Obj(Dictionary<string, object> d, string key)

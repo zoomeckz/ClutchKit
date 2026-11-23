@@ -1,24 +1,32 @@
-// ClutchKit - gift actions: when a viewer sends a gift, press keys in your game (or type text, e.g. a command).
+// ClutchKit - actions: when something happens on your LIVE (a gift, follow, share, join or likes),
+// play a sound, press keys in your game or type text (e.g. a command).
 // ----------------------------------------------------------------------------------
-// GiftRule   - one "when this gift arrives, do this" rule (saved in settings.ini as rule.<id>.*)
-// KeySender  - presses keys / types text with SendInput, the way a real keyboard does (scan codes)
-// GiftEngine - matches gifts to rules (including gift combos) and runs them one after another from a queue
+// LiveEvent   - one thing that happened on the LIVE (or a test event)
+// GiftRule    - one "when this happens, do this" rule (saved in settings.ini as rule.<id>.*)
+// KeySender   - presses keys / types text with SendInput, the way a real keyboard does (scan codes)
+// SoundPlayer - plays MP3/WAV files with Windows' own media player engine (MCI), with volume
+// GiftEngine  - matches events to rules (incl. gift combos, like milestones, cooldowns) and runs them
+//               from two queues: one for sounds, one for keys - so a sound never waits for key presses
 
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
 using System.Runtime.InteropServices;
 using System.Security.Principal;
 using System.Text;
 using System.Threading;
 
-// One gift as it arrives from TikTok (or from the "Send test gift" button).
-public class GiftEvent
+// One thing that happened on the LIVE, as it arrives from TikTok (or from a test button).
+public class LiveEvent
 {
+    public const string Gift = "gift", Follow = "follow", Share = "share", Join = "join", Likes = "likes";
+
+    public string Type = Gift;
     public string User = "", Nick = "", UserId = "";
     public string GiftName = "", GiftId = "", GroupId = "";
     public int Coins;            // coins per single gift
-    public int RepeatCount = 1;  // how many so far in this combo
+    public int RepeatCount = 1;  // gifts: how many so far in this combo; likes: how many likes in this message
     public bool RepeatEnd = true;
     public bool Streakable;      // combo gift: TikTok sends updates while the combo runs, then a last one
     public bool Test;
@@ -26,43 +34,68 @@ public class GiftEvent
     public string Who { get { return User.Length > 0 ? "@" + User : (Nick.Length > 0 ? Nick : "someone"); } }
 }
 
+// One rule: when <trigger> happens, do <kind> (press a key / type text / play a sound).
 public class GiftRule
 {
-    public const string KindKey = "key", KindText = "text";
-    public static readonly string[] KindNames = { "Press a key", "Type text" };
+    public const string KindKey = "key", KindText = "text", KindSound = "sound";
+    public static readonly string[] Kinds = { KindKey, KindText, KindSound };
+    public static readonly string[] KindNames = { "Press a key", "Type text", "Play a sound" };
+    public static readonly string[] Triggers = { LiveEvent.Gift, LiveEvent.Follow, LiveEvent.Share, LiveEvent.Join, LiveEvent.Likes };
+    public static readonly string[] TriggerNames = { "Gift", "Follow", "Share", "Viewer joins", "Likes" };
 
     public int Id;
     public bool Enabled = true;
+    public string Trigger = LiveEvent.Gift;
     public string Gifts = "Rose";      // gift names, comma separated; empty = any gift
     public int MinCoins = 0;           // only gifts worth at least this many coins each
+    public int EveryLikes = 100;       // likes: run once every this many likes
+    public int CooldownSec = 0;        // don't run again within this many seconds
     public string Kind = KindKey;
     public Hotkey Key = new Hotkey(0, 0);   // the key to press (text: optional key pressed first, e.g. T to open chat)
     public int HoldMs = 60;
     public string Text = "";
     public bool Enter = true;          // text: press Enter after typing
+    public string SoundFile = "";
+    public int Volume = 80;            // 0-100
     public int Times = 1;              // how many times per trigger
-    public bool PerGift = true;        // true: a x10 combo runs it 10 times; false: once per send
+    public bool PerGift = true;        // gifts: true = a x10 combo runs it 10 times; false = once per send
 
     public GiftRule Clone() { return (GiftRule)MemberwiseClone(); }
 
     public bool AnyGift { get { string g = Gifts.Trim(); return g.Length == 0 || g == "*"; } }
 
-    public bool Matches(GiftEvent g)
+    public bool Matches(LiveEvent e)
     {
-        if (!Enabled) return false;
-        if (MinCoins > 0 && g.Coins < MinCoins) return false;
+        if (!Enabled || e.Type != Trigger) return false;
+        if (Trigger != LiveEvent.Gift) return true;
+        if (MinCoins > 0 && e.Coins < MinCoins) return false;
         if (AnyGift) return true;
         foreach (string part in Gifts.Split(','))
-            if (part.Trim().Length > 0 && string.Equals(part.Trim(), g.GiftName.Trim(), StringComparison.OrdinalIgnoreCase)) return true;
+            if (part.Trim().Length > 0 && string.Equals(part.Trim(), e.GiftName.Trim(), StringComparison.OrdinalIgnoreCase)) return true;
         return false;
     }
 
-    public bool CanRun { get { return Kind == KindText ? Text.Length > 0 : Key.IsSet; } }
+    public bool CanRun
+    {
+        get
+        {
+            if (Kind == KindText) return Text.Length > 0;
+            if (Kind == KindSound) return SoundFile.Length > 0;
+            return Key.IsSet;
+        }
+    }
 
     public string TriggerText
     {
         get
         {
+            switch (Trigger)
+            {
+                case LiveEvent.Follow: return "follow";
+                case LiveEvent.Share: return "share";
+                case LiveEvent.Join: return "viewer joins";
+                case LiveEvent.Likes: return "every " + EveryLikes + " likes";
+            }
             string t = AnyGift ? "any gift" : Gifts.Trim();
             if (MinCoins > 0) t += " (" + MinCoins + "+ coins)";
             return t;
@@ -74,6 +107,7 @@ public class GiftRule
         get
         {
             string times = Times > 1 ? " x" + Times : "";
+            if (Kind == KindSound) return "play " + (SoundFile.Length > 0 ? Path.GetFileName(SoundFile) : "a sound") + times;
             if (Kind == KindText)
                 return (Key.IsSet ? Key + ", then type \"" : "type \"") + Text + "\"" + (Enter ? " + Enter" : "") + times;
             return "press " + Key + times;
@@ -86,13 +120,18 @@ public class GiftRule
         r.Id = id;
         string pre = "rule." + id + ".", v;
         if (kv.TryGetValue(pre + "on", out v)) r.Enabled = Settings.ParseBool(v, true);
+        if (kv.TryGetValue(pre + "trigger", out v) && Array.IndexOf(Triggers, v.Trim()) >= 0) r.Trigger = v.Trim();
         if (kv.TryGetValue(pre + "gifts", out v)) r.Gifts = v.Trim();
         if (kv.TryGetValue(pre + "mincoins", out v)) r.MinCoins = Settings.ParseInt(v, 0, 0, 1000000);
-        if (kv.TryGetValue(pre + "kind", out v)) r.Kind = v.Trim() == KindText ? KindText : KindKey;
+        if (kv.TryGetValue(pre + "everylikes", out v)) r.EveryLikes = Settings.ParseInt(v, r.EveryLikes, 1, 10000000);
+        if (kv.TryGetValue(pre + "cooldown", out v)) r.CooldownSec = Settings.ParseInt(v, 0, 0, 3600);
+        if (kv.TryGetValue(pre + "kind", out v) && Array.IndexOf(Kinds, v.Trim()) >= 0) r.Kind = v.Trim();
         if (kv.TryGetValue(pre + "key", out v)) r.Key = Hotkey.Parse(v.Trim(), r.Key);
         if (kv.TryGetValue(pre + "holdms", out v)) r.HoldMs = Settings.ParseInt(v, r.HoldMs, 10, 10000);
         if (kv.TryGetValue(pre + "text", out v)) r.Text = v;
         if (kv.TryGetValue(pre + "enter", out v)) r.Enter = Settings.ParseBool(v, true);
+        if (kv.TryGetValue(pre + "sound", out v)) r.SoundFile = v.Trim();
+        if (kv.TryGetValue(pre + "volume", out v)) r.Volume = Settings.ParseInt(v, r.Volume, 0, 100);
         if (kv.TryGetValue(pre + "times", out v)) r.Times = Settings.ParseInt(v, 1, 1, 100);
         if (kv.TryGetValue(pre + "pergift", out v)) r.PerGift = Settings.ParseBool(v, true);
         return r;
@@ -102,13 +141,18 @@ public class GiftRule
     {
         string pre = "rule." + Id + ".";
         b.AppendLine(pre + "on=" + Enabled);
+        b.AppendLine(pre + "trigger=" + Trigger);
         b.AppendLine(pre + "gifts=" + Gifts.Replace("\r", "").Replace("\n", " "));
         b.AppendLine(pre + "minCoins=" + MinCoins);
+        b.AppendLine(pre + "everyLikes=" + EveryLikes);
+        b.AppendLine(pre + "cooldown=" + CooldownSec);
         b.AppendLine(pre + "kind=" + Kind);
         b.AppendLine(pre + "key=" + Key.Serialize());
         b.AppendLine(pre + "holdMs=" + HoldMs);
         b.AppendLine(pre + "text=" + Text.Replace("\r", "").Replace("\n", " "));
         b.AppendLine(pre + "enter=" + Enter);
+        b.AppendLine(pre + "sound=" + SoundFile);
+        b.AppendLine(pre + "volume=" + Volume);
         b.AppendLine(pre + "times=" + Times);
         b.AppendLine(pre + "perGift=" + PerGift);
     }
@@ -287,18 +331,81 @@ public static class KeySender
     }
 }
 
-// Turns gifts into key presses. Gifts are matched on the UI thread; the keys are pressed on a
-// worker thread, one action at a time, so a 99x combo can't flood the game in one frame.
+
+// Plays sound files (MP3, WAV, WMA, ...) through Windows' own media engine (MCI) - no extra
+// software needed. The sound goes to your default speakers/headset, which LIVE Studio picks up
+// as desktop audio. Call only from one worker thread.
+public static class SoundPlayer
+{
+    [DllImport("winmm.dll", CharSet = CharSet.Unicode)]
+    static extern int mciSendString(string command, StringBuilder ret, int retLength, IntPtr callback);
+    [DllImport("winmm.dll", CharSet = CharSet.Unicode)]
+    static extern bool mciGetErrorString(int error, StringBuilder text, int length);
+
+    public static readonly string[] Extensions = { ".mp3", ".wav", ".wma", ".m4a", ".aac" };
+    static int counter;
+
+    static int Send(string cmd, StringBuilder ret) { return mciSendString(cmd, ret, ret == null ? 0 : ret.Capacity, IntPtr.Zero); }
+
+    static string Error(int code)
+    {
+        StringBuilder b = new StringBuilder(256);
+        return mciGetErrorString(code, b, b.Capacity) ? b.ToString() : "error " + code;
+    }
+
+    // Plays the file and returns when it has finished (or stop() says to stop). null = OK, else what went wrong.
+    public static string Play(string path, int volume, Func<bool> stop)
+    {
+        if (string.IsNullOrEmpty(path) || !File.Exists(path)) return "the sound file isn't there anymore (" + path + ")";
+        if (path.IndexOf('"') >= 0) return "the file name can't contain quotes";
+        string alias = "ck" + Interlocked.Increment(ref counter);
+        int err = Send("open \"" + path + "\" type mpegvideo alias " + alias, null);
+        if (err != 0) return Error(err);
+        try
+        {
+            Send("setaudio " + alias + " volume to " + Math.Max(0, Math.Min(100, volume)) * 10, null);
+            err = Send("play " + alias, null);
+            if (err != 0) return Error(err);
+            DateTime start = DateTime.UtcNow;
+            StringBuilder mode = new StringBuilder(64);
+            while (true)
+            {
+                Thread.Sleep(40);
+                if (stop()) break;
+                double ms = (DateTime.UtcNow - start).TotalMilliseconds;
+                if (ms > 10 * 60 * 1000) break;   // safety: never block the queue longer than 10 minutes
+                mode.Length = 0;
+                if (Send("status " + alias + " mode", mode) != 0) break;
+                string m = mode.ToString();
+                if (m != "playing" && m != "seeking" && m != "not ready" && ms > 300) break;
+            }
+        }
+        finally { Send("close " + alias, null); }
+        return null;
+    }
+}
+
+// Turns LIVE events into actions. Events are matched on the UI thread; the actions run on two
+// worker threads (keys/text, sounds), one at a time each, so a 99x combo can't flood anything.
 public class GiftEngine
 {
-    class Job { public GiftRule Rule; public GiftEvent Gift; }
+    class Job { public GiftRule Rule; public LiveEvent Event; }
     class Streak { public int Count; public DateTime Seen; }
 
+    // one queue + worker thread
+    class Lane
+    {
+        public readonly Queue<Job> Jobs = new Queue<Job>();
+        public readonly AutoResetEvent Wake = new AutoResetEvent(false);
+    }
+
     readonly App app;
-    readonly Queue<Job> queue = new Queue<Job>();
     readonly object gate = new object();
-    readonly AutoResetEvent wake = new AutoResetEvent(false);
+    readonly Lane keys = new Lane(), sounds = new Lane();
     readonly Dictionary<string, Streak> streaks = new Dictionary<string, Streak>();
+    readonly Dictionary<int, DateTime> lastRun = new Dictionary<int, DateTime>();
+    volatile bool stopSound;
+    long likeTotal;
     string warnedProcess = "";
 
     public event EventHandler QueueChanged;   // raised on the UI thread
@@ -307,23 +414,33 @@ public class GiftEngine
     public GiftEngine(App app)
     {
         this.app = app;
-        Thread t = new Thread(Worker);
+        StartWorker(keys, "Key actions");
+        StartWorker(sounds, "Sound actions");
+    }
+
+    void StartWorker(Lane lane, string name)
+    {
+        Thread t = new Thread(delegate () { Worker(lane); });
         t.IsBackground = true;
-        t.Name = "Gift actions";
+        t.Name = name;
         t.Start();
     }
 
-    public int Waiting { get { lock (gate) return queue.Count; } }
+    public int Waiting { get { lock (gate) return keys.Jobs.Count + sounds.Jobs.Count; } }
+    public long LikeTotal { get { return likeTotal; } }
 
+    // Empties both queues and stops the sound that is playing.
     public void Clear()
     {
-        lock (gate) queue.Clear();
+        lock (gate) { keys.Jobs.Clear(); sounds.Jobs.Clear(); }
+        stopSound = true;
+        sounds.Wake.Set();
         RaiseQueue();
     }
 
     // How many new gifts this event adds. Combo gifts arrive several times (x1, x2, ... and a final
     // message), so only the increase since the last message for that combo counts.
-    public int NewGifts(GiftEvent g, out bool firstOfSend)
+    public int NewGifts(LiveEvent g, out bool firstOfSend)
     {
         if (!g.Streakable)
         {
@@ -350,8 +467,18 @@ public class GiftEngine
         return added;
     }
 
-    // Called on the UI thread for every gift message.
-    public void OnGift(GiftEvent g)
+    // Called on the UI thread for everything that happens on the LIVE.
+    public void OnEvent(LiveEvent e)
+    {
+        switch (e.Type)
+        {
+            case LiveEvent.Gift: OnGift(e); break;
+            case LiveEvent.Likes: OnLikes(e); break;
+            default: OnSimple(e); break;
+        }
+    }
+
+    void OnGift(LiveEvent g)
     {
         bool first;
         int added = NewGifts(g, out first);
@@ -359,43 +486,84 @@ public class GiftEngine
 
         string what = g.Who + " sent " + (g.GiftName.Length > 0 ? g.GiftName : "a gift") + (added > 1 ? " x" + added : "") +
                       (g.Coins > 0 ? " (" + g.Coins * Math.Max(1, added) + " coins)" : "") + (g.Test ? " [test]" : "");
-        if (!app.S.ActionsOn) { app.Log(what + " - gift actions are paused"); return; }
+        if (!app.S.ActionsOn) { app.Log(what + " - actions are paused"); return; }
+        string result = RunRules(g, delegate (GiftRule r) { return r.PerGift && r.Kind != GiftRule.KindSound ? added : (first ? 1 : 0); });
+        app.Log(what + " - " + (result ?? "no action for it"));
+    }
 
-        int queued = 0, dropped = 0;
+    void OnSimple(LiveEvent e)
+    {
+        string what = e.Who + (e.Type == LiveEvent.Follow ? " followed you" : e.Type == LiveEvent.Share ? " shared your LIVE" : " joined") +
+                      (e.Test ? " [test]" : "");
+        if (!app.S.ActionsOn) { if (e.Type != LiveEvent.Join) app.Log(what + " - actions are paused"); return; }
+        string result = RunRules(e, delegate (GiftRule r) { return 1; });
+        if (result != null) app.Log(what + " - " + result);
+        else if (e.Type != LiveEvent.Join) app.Log(what);   // joins are too many to log one by one
+    }
+
+    void OnLikes(LiveEvent e)
+    {
+        long before = likeTotal;
+        likeTotal += Math.Max(1, e.RepeatCount);
+        long now = likeTotal;
+        if (!app.S.ActionsOn) return;
+        string result = RunRules(e, delegate (GiftRule r)
+        {
+            long every = Math.Max(1, r.EveryLikes);
+            return (int)Math.Min(100, now / every - before / every);
+        });
+        if (result != null) app.Log(now + " likes" + (e.Test ? " [test]" : "") + " - " + result);
+    }
+
+    // Queues every matching rule runsFor(rule) times (cooldowns applied). Returns a log text, or null if nothing ran.
+    string RunRules(LiveEvent e, Func<GiftRule, int> runsFor)
+    {
+        int queued = 0, dropped = 0, cooling = 0;
+        DateTime now = DateTime.UtcNow;
         foreach (GiftRule r in app.S.Rules)
         {
-            if (!r.Matches(g) || !r.CanRun) continue;
-            int runs = r.PerGift ? added : (first ? 1 : 0);
+            if (!r.Matches(e) || !r.CanRun) continue;
+            int runs = runsFor(r);
+            if (runs <= 0) continue;
+            DateTime last;
+            if (r.CooldownSec > 0)
+            {
+                if (lastRun.TryGetValue(r.Id, out last) && (now - last).TotalSeconds < r.CooldownSec) { cooling++; continue; }
+                runs = 1;
+            }
+            lastRun[r.Id] = now;
             for (int i = 0; i < runs; i++)
             {
-                if (Enqueue(r, g)) queued++; else dropped++;
+                if (Enqueue(r, e)) queued++; else dropped++;
             }
         }
-        if (queued == 0 && dropped == 0) app.Log(what + " - no gift action for it");
-        else app.Log(what + " - " + queued + " action" + (queued == 1 ? "" : "s") + " queued" +
-                     (dropped > 0 ? ", " + dropped + " skipped (queue full)" : ""));
+        if (queued == 0 && dropped == 0)
+            return cooling > 0 && e.Type != LiveEvent.Join ? "waiting for cooldown" : null;
+        return queued + " action" + (queued == 1 ? "" : "s") + " queued" + (dropped > 0 ? ", " + dropped + " skipped (queue full)" : "");
     }
 
-    // "Test" button on a gift action: runs it once, whether or not gift actions are paused.
+    // Test button on a rule: runs it once, whether or not actions are paused or cooling down.
     public void RunTest(GiftRule r)
     {
-        GiftEvent g = new GiftEvent();
-        g.Test = true;
-        g.GiftName = r.AnyGift ? "test gift" : r.Gifts.Split(',')[0].Trim();
-        Enqueue(r, g);
+        LiveEvent e = new LiveEvent();
+        e.Test = true;
+        e.Type = r.Trigger;
+        e.GiftName = r.Trigger == LiveEvent.Gift ? (r.AnyGift ? "test gift" : r.Gifts.Split(',')[0].Trim()) : "";
+        Enqueue(r, e);
     }
 
-    bool Enqueue(GiftRule r, GiftEvent g)
+    bool Enqueue(GiftRule r, LiveEvent e)
     {
+        Lane lane = r.Kind == GiftRule.KindSound ? sounds : keys;
         lock (gate)
         {
-            if (queue.Count >= Math.Max(1, app.S.MaxQueue)) return false;
+            if (lane.Jobs.Count >= Math.Max(1, app.S.MaxQueue)) return false;
             Job j = new Job();
             j.Rule = r.Clone();   // the settings window may change the rule while it waits
-            j.Gift = g;
-            queue.Enqueue(j);
+            j.Event = e;
+            lane.Jobs.Enqueue(j);
         }
-        wake.Set();
+        lane.Wake.Set();
         RaiseQueue();
         return true;
     }
@@ -405,29 +573,48 @@ public class GiftEngine
         app.Ui(delegate { if (QueueChanged != null) QueueChanged(this, EventArgs.Empty); });
     }
 
-    void Worker()
+    void Worker(Lane lane)
     {
         while (true)
         {
-            wake.WaitOne();
+            lane.Wake.WaitOne();
             while (true)
             {
                 Job j;
                 lock (gate)
                 {
-                    if (queue.Count == 0) break;
-                    j = queue.Dequeue();
+                    if (lane.Jobs.Count == 0) break;
+                    j = lane.Jobs.Dequeue();
                 }
+                if (lane == sounds) stopSound = false;
                 RaiseQueue();
-                try { Run(j); } catch (Exception ex) { app.Log("Gift action failed: " + ex.Message); }
+                try
+                {
+                    if (lane == sounds) RunSound(j); else RunKeys(j);
+                }
+                catch (Exception ex) { app.Log("Action failed: " + ex.Message); }
             }
         }
     }
 
-    void Run(Job j)
+    string Source(Job j) { return j.Rule.TriggerText + (j.Event.Test ? ", test" : " from " + j.Event.Who); }
+
+    void RunSound(Job j)
     {
         GiftRule r = j.Rule;
-        if (!j.Gift.Test && !app.S.ActionsOn) return;
+        if (!j.Event.Test && !app.S.ActionsOn) return;
+        for (int i = 0; i < r.Times && !stopSound; i++)
+        {
+            string error = SoundPlayer.Play(r.SoundFile, r.Volume, delegate { return stopSound; });
+            if (error != null) { app.Log("Couldn't play " + Path.GetFileName(r.SoundFile) + ": " + error); return; }
+        }
+        app.Log((stopSound ? "Stopped: " : "Played: ") + Path.GetFileName(r.SoundFile) + " (" + Source(j) + ")");
+    }
+
+    void RunKeys(Job j)
+    {
+        GiftRule r = j.Rule;
+        if (!j.Event.Test && !app.S.ActionsOn) return;
         int elevated;
         string front = KeySender.Foreground(out elevated);
         string only = KeySender.CleanProcessName(app.S.OnlyProcess);
@@ -441,7 +628,7 @@ public class GiftEngine
         {
             warnedProcess = front;
             app.Log("Warning: " + front + " runs as administrator, so Windows may block ClutchKit's keys. " +
-                    "Fix: Gift actions > Restart as administrator.");
+                    "Fix: Actions > Restart as administrator.");
             app.Ui(delegate { if (ElevationProblem != null) ElevationProblem(front); });
         }
 
@@ -464,7 +651,6 @@ public class GiftEngine
                 Thread.Sleep(gap);
             }
         }
-        app.Log((ok ? "Did: " : "Windows blocked: ") + r.ActionText + " (" + r.TriggerText + (j.Gift.Test ? ", test" : " from " + j.Gift.Who) + ")" +
-                (front.Length > 0 ? " -> " + front : ""));
+        app.Log((ok ? "Did: " : "Windows blocked: ") + r.ActionText + " (" + Source(j) + ")" + (front.Length > 0 ? " -> " + front : ""));
     }
 }

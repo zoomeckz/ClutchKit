@@ -1,8 +1,8 @@
 // ClutchKit - stream toolkit for TikTok LIVE Studio.
 // ----------------------------------------------------------------------------------
 // Counters (as many as you like, each with its own hotkeys and its own look) shown in one overlay,
-// and gift actions: TikTok LIVE gifts press keys in your game (Actions.cs, TikTok.cs, ActionsPage.cs).
-// Menu: Counters > Gift actions > TikTok LIVE > Overlay (how it gets on stream) > Settings (app options).
+// and actions: LIVE gifts, follows, shares, joins and likes play sounds or press keys in your game (Actions.cs, TikTok.cs, ActionsPage.cs).
+// Menu: Counters > Actions > TikTok LIVE > Overlay (how it gets on stream) > Settings (app options).
 // Overlay modes:
 //   - Link overlay: a "data:" link pasted once into LIVE Studio (Add source > Link). It loads the
 //     overlay script from this app (http://127.0.0.1:<port>, this PC only), so every change made in
@@ -39,14 +39,14 @@ using Microsoft.Win32;
 [assembly: AssemblyProduct("ClutchKit")]
 [assembly: AssemblyCompany("ClutchKit")]
 [assembly: AssemblyCopyright("Copyright (c) 2026 ClutchKit")]
-[assembly: AssemblyVersion("3.0.0.0")]
-[assembly: AssemblyFileVersion("3.0.0.0")]
-[assembly: AssemblyInformationalVersion("3.0")]
+[assembly: AssemblyVersion("3.1.0.0")]
+[assembly: AssemblyFileVersion("3.1.0.0")]
+[assembly: AssemblyInformationalVersion("3.1")]
 
 static class Program
 {
     public const string Name = "ClutchKit";
-    public const string Version = "3.0";
+    public const string Version = "3.1";
     // Shared with the older "Death Counter" builds so old and new never run (and count) at the same time.
     public static string MutexName = "Local\\DeathCounterTikTok";
 
@@ -464,11 +464,11 @@ public class Settings
     public bool StartInTray = false, TrayHintShown = false;
     public int Port = 8787;
 
-    // gift actions
+    // actions
     public const int MaxRules = 30;
     public List<GiftRule> Rules = new List<GiftRule>();
     public bool ActionsOn = true;
-    public Hotkey PauseKey = new Hotkey(0, 0);   // turns gift actions on/off while you play
+    public Hotkey PauseKey = new Hotkey(0, 0);   // turns actions on/off while you play
     public string OnlyProcess = "";              // only press keys while this program is in front ("" = any)
     public int GapMs = 80;                       // pause between actions
     public int MaxQueue = 50;                    // actions waiting at most; more are skipped
@@ -867,7 +867,7 @@ public class App : ApplicationContext
         Raise(SettingsChanged);
     }
 
-    // ---------------- gift actions ----------------
+    // ---------------- actions ----------------
 
     // Runs code on the UI thread (safe to call from any thread).
     public void Ui(MethodInvoker m)
@@ -895,7 +895,7 @@ public class App : ApplicationContext
         S.ActionsOn = on;
         if (!on) Engine.Clear();
         S.Save(SettingsFile);
-        Log(on ? "Gift actions turned on." : "Gift actions paused - gifts won't press any keys.");
+        Log(on ? "Actions turned on." : "Actions paused - nothing will play or press keys.");
         Raise(ActionsToggled);
     }
 
@@ -932,10 +932,10 @@ public class App : ApplicationContext
     }
 
     // Who already uses this key (for the "already used" message), or null.
-    // exceptAction -2 = the gift actions on/off key.
+    // exceptAction -2 = the actions on/off key.
     public string KeyOwner(Hotkey hk, Counter exceptCounter, int exceptAction)
     {
-        if (exceptAction != -2 && S.PauseKey.Same(hk)) return "Gift actions on/off";
+        if (exceptAction != -2 && S.PauseKey.Same(hk)) return "Actions on/off";
         foreach (Counter c in S.Counters)
             for (int a = 0; a < 3; a++)
                 if (!(c == exceptCounter && a == exceptAction) && c.Keys[a].Same(hk))
@@ -1023,7 +1023,7 @@ public class App : ApplicationContext
         {
             int vk = Marshal.ReadInt32(lParam) & 0xFF;
             int m = (int)wParam;
-            // keys pressed by ClutchKit's own gift actions (KBDLLHOOKSTRUCT.dwExtraInfo)
+            // keys pressed by ClutchKit's own actions (KBDLLHOOKSTRUCT.dwExtraInfo)
             bool own = Marshal.ReadIntPtr(lParam, 16) == KeySender.Tag;
             if (m == WM_KEYDOWN || m == WM_SYSKEYDOWN)
             {
@@ -2122,7 +2122,7 @@ public partial class MainForm : Form
         // Menu order: what you track > how it gets on stream > app options
         loading = true;
         AddPage("Counters", BuildCountersPage());
-        AddPage("Gift actions", BuildActionsPage());
+        AddPage("Actions", BuildActionsPage());
         AddPage("TikTok LIVE", BuildTikTokPage());
         AddPage("Overlay", BuildOverlayPage());
         AddPage("Settings", BuildSettingsPage());
@@ -2399,7 +2399,7 @@ public partial class MainForm : Form
 
     protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
     {
-        if (keyCapBtn != null) return KeyCaptureKey(keyData);   // gift action keys (ActionsPage.cs)
+        if (keyCapBtn != null) return KeyCaptureKey(keyData);   // action keys (ActionsPage.cs)
         if (capAction < 0) return base.ProcessCmdKey(ref msg, keyData);
         Keys key = keyData & Keys.KeyCode;
         if (key == Keys.ControlKey || key == Keys.ShiftKey || key == Keys.Menu || key == Keys.LWin || key == Keys.RWin ||

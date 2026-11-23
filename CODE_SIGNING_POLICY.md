@@ -23,7 +23,7 @@ user or the person installing or operating it.
 ClutchKit runs a small web server that is only reachable from the same computer (`127.0.0.1`), so that the
 TikTok LIVE Studio overlay on that computer can show the counters.
 The keyboard is only used to react to the hotkeys the user sets; key presses are not stored or sent anywhere.
-Gift actions press the keys the user chose (or type the text the user entered) when a gift arrives.
+Actions play the sound files the user picked, press the keys the user chose or type the text the user entered when something happens on the LIVE. Sound files the user picks are copied into the ClutchKit data folder.
 
 The only internet connection is the optional TikTok LIVE connection: when the user presses **Connect** (or turns
 on "Connect automatically"), ClutchKit sends the TikTok username and the user's own Euler Stream API key to

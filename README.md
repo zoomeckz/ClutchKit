@@ -1,7 +1,8 @@
 # ClutchKit
 
 Stream toolkit for **TikTok LIVE Studio** on Windows: on-stream **counters** (deaths, wins, kills, attempts, ...)
-that you change with hotkeys while you play, and **gift actions** that let viewers' gifts press keys in your game.
+that you change with hotkeys while you play, and **actions**: gifts, follows, shares, joins and likes play sound alerts
+or press keys in your game.
 
 **Counters**
 - As many counters as you need (up to 8), each with its own hotkeys and its own look
@@ -11,16 +12,20 @@ that you change with hotkeys while you play, and **gift actions** that let viewe
   (or use a capture window instead)
 - Works no matter whether LIVE Studio or ClutchKit is started first
 
-**Gift actions**
-- A gift (by name, or any gift worth at least N coins) presses a key in your game, or types text
-  such as a Minecraft command
+**Actions**
+- Triggers: a gift (by name, or any gift worth at least N coins), a follow, a share, a viewer joining,
+  or every N likes
+- Sound alerts with no limits: MP3/WAV played by ClutchKit itself (not through the overlay), with volume,
+  one after another so they never talk over each other
+- Press a key in your game, or type text such as a Minecraft command
+- Cooldowns per action, so a busy room can't spam join sounds
 - Combos are counted properly: a x10 Rose combo can press the key 10 times, or once
 - Keys are sent like a real keyboard (scan codes) and held long enough for games to notice
 - Safety: only send keys while your game is in front, an on/off hotkey, a queue limit
 - Warns when the game runs as administrator (Windows then blocks the keys) and offers to restart as administrator
-- Test buttons and fake gifts, so you can set everything up offline
-- Gifts are read through [Euler Stream](https://www.eulerstream.com) (free account and API key), because TikTok
-  has no official API for LIVE gifts
+- Test buttons and fake events, so you can set everything up offline
+- LIVE events are read through [Euler Stream](https://www.eulerstream.com) (free account and API key), because
+  TikTok has no official API for LIVE events
 
 ## Install
 

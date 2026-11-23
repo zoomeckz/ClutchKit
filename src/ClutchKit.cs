@@ -2,7 +2,7 @@
 // ----------------------------------------------------------------------------------
 // Counters (as many as you like, each with its own hotkeys and its own look) shown in one overlay,
 // and actions: LIVE gifts, follows, shares, joins and likes play sounds or press keys in your game (Actions.cs, TikTok.cs, ActionsPage.cs).
-// Menu: Counters > Actions > TikTok LIVE > Overlay (how it gets on stream) > Settings (app options).
+// Menu: General > Counters > Actions > TikTok LIVE > Overlay (how it gets on stream) > Settings (app options) > Debug (Debug.cs, DebugPage.cs).
 // Overlay modes:
 //   - Link overlay: a "data:" link pasted once into LIVE Studio (Add source > Link). It loads the
 //     overlay script from this app (http://127.0.0.1:<port>, this PC only), so every change made in
@@ -63,6 +63,7 @@ static class Program
         try { ServicePointManager.SecurityProtocol |= (SecurityProtocolType)12288; } catch { }   // TLS 1.3
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
+        Diag.HookCrashes();   // anything not caught ends up in a crash report (Debug.cs)
 
         if (args.Length > 0 && args[0].Equals("/uninstall", StringComparison.OrdinalIgnoreCase))
         {
@@ -116,10 +117,12 @@ static class Program
             try
             {
                 Directory.CreateDirectory(dataDir);
+                Diag.Init(dataDir);
                 Application.Run(new App(dataDir, false));
             }
             catch (Exception ex)
             {
+                Diag.Crash(ex, "start", false);
                 MessageBox.Show(L.T("ClutchKit couldn't start:") + "\n\n" + ex.Message, "ClutchKit");
             }
         }
@@ -467,6 +470,7 @@ public class Settings
     // app
     public string Language = "";                 // "" = follow the Windows language
     public int LastPage = 0;                     // the settings window opens where you left off
+    public bool Debug = false;                   // detailed logging (Debug page)
 
     // actions, sorted into topics (groups)
     public const int MaxRules = 300, MaxGroups = 50;
@@ -547,6 +551,7 @@ public class Settings
         if (kv.TryGetValue("tiktok.autoconnect", out v)) s.AutoConnect = ParseBool(v, false);
         if (kv.TryGetValue("language", out v)) s.Language = Array.IndexOf(L.Codes, v.Trim()) >= 0 ? v.Trim() : "";
         if (kv.TryGetValue("lastpage", out v)) s.LastPage = ParseInt(v, 0, 0, 20);
+        if (kv.TryGetValue("debug", out v)) s.Debug = ParseBool(v, false);
         if (kv.TryGetValue("groups", out v))
         {
             foreach (string part in v.Split(','))
@@ -699,6 +704,7 @@ public class Settings
         b.AppendLine("tiktok.autoConnect=" + AutoConnect);
         b.AppendLine("language=" + Language);
         b.AppendLine("lastPage=" + LastPage);
+        b.AppendLine("debug=" + Debug);
         WriteFile(path, b.ToString());
     }
 
@@ -800,6 +806,8 @@ public class App : ApplicationContext
 
         S = Settings.Load(SettingsFile);
         L.Use(L.Resolve(S.Language));
+        Diag.Attach(this);
+        Diag.SetVerbose(S.Debug);
         LoadCounts();
         S.Save(SettingsFile);
         SaveCounts();
@@ -982,6 +990,7 @@ public class App : ApplicationContext
     public void Log(string text)
     {
         string line = DateTime.Now.ToString("HH:mm:ss") + "  " + text;
+        Diag.Write("log", text);
         Ui(delegate
         {
             log.Add(line);
@@ -1199,13 +1208,17 @@ public class App : ApplicationContext
         if (CapturingHotkey) return;
         Hotkey pressed = new Hotkey(mods, vk);
         // a gift can press a counter's key (e.g. a Rose adds a death), but never the on/off key
-        if (!own && pressed.Same(S.PauseKey)) marshal.BeginInvoke((MethodInvoker)delegate { SetActionsOn(!S.ActionsOn); });
+        if (!own && pressed.Same(S.PauseKey)) { Diag.Count("hotkey.pressed"); marshal.BeginInvoke((MethodInvoker)delegate { SetActionsOn(!S.ActionsOn); }); }
         foreach (Counter c in S.Counters)
         {
             Counter target = c;
-            if (pressed.Same(c.Keys[0])) marshal.BeginInvoke((MethodInvoker)delegate { Add(target, 1); });
-            else if (pressed.Same(c.Keys[1])) marshal.BeginInvoke((MethodInvoker)delegate { Add(target, -1); });
-            else if (pressed.Same(c.Keys[2])) marshal.BeginInvoke((MethodInvoker)delegate { Reset(target); });
+            int a = pressed.Same(c.Keys[0]) ? 0 : pressed.Same(c.Keys[1]) ? 1 : pressed.Same(c.Keys[2]) ? 2 : -1;
+            if (a < 0) continue;
+            Diag.Count("hotkey.pressed");
+            Diag.Write("hotkey", pressed + " -> " + c.DisplayName + " " + Counter.ActionNames[a] + (own ? " (pressed by an action)" : ""));
+            if (a == 0) marshal.BeginInvoke((MethodInvoker)delegate { Add(target, 1); });
+            else if (a == 1) marshal.BeginInvoke((MethodInvoker)delegate { Add(target, -1); });
+            else marshal.BeginInvoke((MethodInvoker)delegate { Reset(target); });
         }
     }
 
@@ -1554,11 +1567,12 @@ public class OverlayServer
                     if (line == null) break;
                     if (line.Length == 0) continue;
                     bool close = false;
-                    string h;
+                    string h, agent = "";
                     while (!string.IsNullOrEmpty(h = reader.ReadLine()))
                     {
                         if (h.StartsWith("Connection:", StringComparison.OrdinalIgnoreCase) &&
                             h.IndexOf("close", StringComparison.OrdinalIgnoreCase) >= 0) close = true;
+                        if (h.StartsWith("User-Agent:", StringComparison.OrdinalIgnoreCase)) agent = h.Substring(11).Trim();
                     }
                     if (h == null) break;
 
@@ -1575,6 +1589,11 @@ public class OverlayServer
                     else if (path == "/api/count") bytes = Encoding.UTF8.GetBytes("{\"count\":" + app.FirstCount + "}");   // links from older versions
                     else if (path == "/overlay.js") { type = "application/javascript"; bytes = ScriptBytes; }
                     else { status = "404 Not Found"; type = "text/plain"; bytes = Encoding.UTF8.GetBytes("Not found"); }
+                    // who asks for the overlay, and how often (Debug page: is LIVE Studio really loading it?)
+                    Diag.Count(path == "/api/state" ? "overlay.state" : path == "/overlay.js" ? "overlay.script" : "overlay.other");
+                    Diag.Mark("overlay");
+                    if (agent.Length > 0) Diag.Note("overlay.agent", agent.Length > 160 ? agent.Substring(0, 160) : agent);
+                    if (path != "/api/state") Diag.Write("overlay", method + " " + path + " -> " + status + (agent.Length > 0 ? " (" + agent + ")" : ""));
 
                     string head = "HTTP/1.1 " + status + "\r\n" +
                                   "Content-Type: " + type + "; charset=utf-8\r\n" +
@@ -2313,9 +2332,20 @@ public partial class MainForm : Form
 
     RadioButton linkRadio, windowRadio;
 
-    public MainForm(App app)
+    readonly bool probe;   // built out of sight for the layout check (Debug page)
+
+    public MainForm(App app) : this(app, false) { }
+
+    public MainForm(App app, bool probe)
     {
         this.app = app;
+        this.probe = probe;
+        if (probe)
+        {
+            ShowInTaskbar = false;
+            StartPosition = FormStartPosition.Manual;
+            Location = new Point(-20000, -20000);
+        }
         Text = "ClutchKit";
         Icon = app.AppIcon;
         BackColor = UI.Bg;
@@ -2323,7 +2353,7 @@ public partial class MainForm : Form
         Font = UI.F(10f, FontStyle.Regular);
         FormBorderStyle = FormBorderStyle.FixedSingle;
         MaximizeBox = false;
-        StartPosition = FormStartPosition.CenterScreen;
+        if (!probe) StartPosition = FormStartPosition.CenterScreen;
         ClientSize = new Size(UI.D(900), UI.D(660));
 
         content = new Panel();
@@ -2345,6 +2375,7 @@ public partial class MainForm : Form
         AddPage(L.T("TikTok LIVE"), BuildTikTokPage());
         AddPage(L.T("Overlay"), BuildOverlayPage());
         AddPage(L.T("Settings"), BuildSettingsPage());
+        AddPage(L.T("Debug"), BuildDebugPage());
         loading = false;
         SelectPage(Math.Max(0, Math.Min(pages.Count - 1, app.S.LastPage)));   // opens where you left off
 
@@ -2423,7 +2454,7 @@ public partial class MainForm : Form
             navButtons[i].ForeColor = i == index ? UI.Text : UI.Muted;
             navButtons[i].Font = UI.F(10.5f, i == index ? FontStyle.Bold : FontStyle.Regular);
         }
-        if (app.S.LastPage != index && !loading)
+        if (app.S.LastPage != index && !loading && !probe)
         {
             app.S.LastPage = index;
             app.SaveSettingsSoon();
@@ -2773,11 +2804,14 @@ public partial class MainForm : Form
         base.OnFormClosing(e);
     }
 
+    protected override bool ShowWithoutActivation { get { return probe; } }   // the layout check never takes the focus
+
     protected override void OnFormClosed(FormClosedEventArgs e)
     {
         app.CountChanged -= OnCount;
         app.SettingsChanged -= OnSettings;
         UnhookActionPages();
+        if (debugTimer != null) debugTimer.Dispose();
         base.OnFormClosed(e);
     }
 }

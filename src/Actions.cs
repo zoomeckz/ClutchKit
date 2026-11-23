@@ -300,7 +300,11 @@ public static class KeySender
     {
         if (list.Count == 0) return true;
         INPUT[] a = list.ToArray();
-        return SendInput((uint)a.Length, a, Marshal.SizeOf(typeof(INPUT))) == a.Length;
+        uint sent = SendInput((uint)a.Length, a, Marshal.SizeOf(typeof(INPUT)));
+        if (sent == a.Length) return true;
+        // error 5 = access denied: the program in front runs as administrator (or is protected)
+        Diag.Error("keys", "Windows took " + sent + " of " + a.Length + " key events (error " + Marshal.GetLastWin32Error() + ")");
+        return false;
     }
 
     static List<int> ModKeys(Hotkey hk)
@@ -550,6 +554,7 @@ public class GiftEngine
     // Called on the UI thread for everything that happens on the LIVE.
     public void OnEvent(LiveEvent e)
     {
+        Diag.Count(e.Test ? "event.test" : "event." + e.Type);
         switch (e.Type)
         {
             case LiveEvent.Gift: OnGift(e); break;
@@ -619,6 +624,9 @@ public class GiftEngine
             if (ran > 0) lastRun[r.Id] = now;   // a skipped action (queue full) doesn't start its cooldown
             queued += ran;
         }
+        if (queued > 0) Diag.Count("actions.queued", queued);
+        if (dropped > 0) Diag.Count("actions.dropped", dropped);
+        if (cooling > 0) Diag.Count("actions.cooling", cooling);
         if (queued == 0 && dropped == 0)
             return cooling > 0 && e.Type != LiveEvent.Join ? L.T("waiting for cooldown") : null;
         return (queued == 1 ? L.T("1 action queued") : L.F("{0} actions queued", queued)) + (dropped > 0 ? ", " + L.F("{0} skipped (queue full)", dropped) : "");
@@ -681,7 +689,11 @@ public class GiftEngine
                 {
                     if (lane == sounds) RunSound(j); else RunKeys(j);
                 }
-                catch (Exception ex) { app.Log(L.F("Action failed: {0}", ex.Message)); }
+                catch (Exception ex)
+                {
+                    app.Log(L.F("Action failed: {0}", ex.Message));
+                    Diag.Error("actions", ex.ToString());
+                }
             }
         }
     }
@@ -695,7 +707,14 @@ public class GiftEngine
         for (int i = 0; i < r.Times && !Cancelled(j); i++)
         {
             string error = SoundPlayer.Play(r.SoundFile, r.Volume, delegate { return Cancelled(j); });
-            if (error != null) { app.Log(L.F("Couldn't play {0}: {1}", Path.GetFileName(r.SoundFile), error)); return; }
+            if (error != null)
+            {
+                app.Log(L.F("Couldn't play {0}: {1}", Path.GetFileName(r.SoundFile), error));
+                Diag.Count("sounds.failed");
+                Diag.Error("sounds", r.SoundFile + ": " + error);
+                return;
+            }
+            Diag.Count("sounds.played");
         }
         app.Log((Cancelled(j) ? L.F("Stopped: {0}", Path.GetFileName(r.SoundFile)) : L.F("Played: {0}", Path.GetFileName(r.SoundFile))) + " (" + Source(j) + ")");
     }
@@ -707,8 +726,10 @@ public class GiftEngine
         int elevated;
         string front = KeySender.Foreground(out elevated);
         string only = KeySender.CleanProcessName(app.S.OnlyProcess);
+        Diag.Note("keys.front", front + (elevated == 1 ? " (runs as administrator)" : elevated == -1 ? " (couldn't check admin)" : ""));
         if (only.Length > 0 && !string.Equals(front, only, StringComparison.OrdinalIgnoreCase))
         {
+            Diag.Count("keys.notfront");
             app.Log(L.F("Skipped \"{0}\": {1} isn't in front", r.ActionText, only) + (front.Length > 0 ? " (" + L.F("{0} is", front) + ")" : ""));
             Thread.Sleep(20);
             return;
@@ -739,6 +760,9 @@ public class GiftEngine
                 Thread.Sleep(gap);
             }
         }
+        Diag.Count(ok ? "keys.ok" : "keys.blocked");
+        Diag.Write("keys", r.Kind + " " + r.Key.Serialize() + " x" + r.Times + " hold " + r.HoldMs + " ms -> " + front +
+                           " (admin: " + elevated + ", ClutchKit admin: " + KeySender.SelfElevated + ") " + (ok ? "OK" : "BLOCKED"));
         app.Log((ok ? L.F("Did: {0}", r.ActionText) : L.F("Windows blocked: {0}", r.ActionText)) + " (" + Source(j) + ")" + (front.Length > 0 ? " -> " + front : ""));
     }
 }

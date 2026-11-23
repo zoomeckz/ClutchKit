@@ -35,6 +35,14 @@ or press keys in your game.
 - Translations live in [src/Translations.cs](src/Translations.cs) (one row per text). Corrections are welcome;
   run `tools\check-translations.ps1` to check that nothing is missing
 
+**Debugging**
+- A Debug page with a live status (TikTok messages by type, events, keys sent or blocked, sounds, overlay requests)
+- Detailed logging to `debug\debug-log.txt`, including the first raw TikTok messages of each type
+- "Save debug report": system info, settings summary (never the API key), errors and the activity log, saved and copied
+- A layout check that builds the window in every language, lists text that is cut off or overlaps, and saves
+  screenshots of every page
+- Crash reports in `debug\` for anything that goes wrong
+
 ## Install
 
 Download `ClutchKit-<version>.zip` from [Releases](../../releases), unzip it and run `ClutchKit.exe`.

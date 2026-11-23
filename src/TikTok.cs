@@ -99,6 +99,7 @@ public class TikTokLive
     {
         Current = s;
         Detail = detail;
+        Diag.Write("tiktok", "status " + s + ": " + detail);
         app.Ui(delegate { if (StatusChanged != null) StatusChanged(this, EventArgs.Empty); });
     }
 
@@ -112,6 +113,7 @@ public class TikTokLive
             int code = -1;
             string reason = "";
             bool gotData = false;
+            Diag.Count("tiktok.connects");
             try { RunOnce(user, apiKey, stop, out code, out reason, ref gotData); }
             catch (Exception ex)
             {
@@ -121,8 +123,13 @@ public class TikTokLive
                 if (reason.Contains("401")) code = 4401;
                 else if (reason.Contains("403")) code = 4403;
                 else if (reason.Contains("429")) code = 4429;
+                if (!stop.WaitOne(0)) Diag.Error("tiktok", e.GetType().Name + ": " + e.Message);
             }
             if (stop.WaitOne(0)) return;
+            Diag.Count("tiktok.close." + code);
+            Diag.Note("tiktok.lastclose", code + (reason.Length > 0 ? " " + reason : "") + " at " + DateTime.Now.ToString("HH:mm:ss") +
+                                           (gotData ? " (had data)" : " (no data)"));
+            Diag.Write("tiktok", "connection ended: code " + code + " " + reason + (gotData ? ", had data" : ", no data"));
             if (gotData) backoff = 5;
 
             int wait;
@@ -207,6 +214,7 @@ public class TikTokLive
                 {
                     // the first message means TikTok is really connected (not live = closed right away instead)
                     gotData = true;
+                    Diag.Count("tiktok.connected");
                     Report(State.Connected, L.F("Connected - listening to @{0}'s LIVE.", user));
                     app.Log("TikTok LIVE: " + L.F("connected to @{0}.", user));
                 }
@@ -240,6 +248,8 @@ public class TikTokLive
         if (i >= length) return;
         if (data[i] != '{' && data[i] != '[')
         {
+            Diag.Count("tiktok.msg.(not JSON)");
+            if (Diag.WantsSample("(not JSON)")) Diag.Sample("(not JSON)", length + " bytes, starts with: " + BitConverter.ToString(data, i, Math.Min(64, length - i)));
             if (!warnedFormat)
             {
                 warnedFormat = true;
@@ -248,9 +258,27 @@ public class TikTokLive
             return;
         }
         object root;
-        try { root = json.DeserializeObject(Encoding.UTF8.GetString(data, i, length - i)); }
-        catch { return; }
-        foreach (KeyValuePair<string, Dictionary<string, object>> ev in Events(root)) Dispatch(ev.Key, ev.Value);
+        string text = Encoding.UTF8.GetString(data, i, length - i);
+        try { root = json.DeserializeObject(text); }
+        catch (Exception ex)
+        {
+            Diag.Count("tiktok.msg.(broken JSON)");
+            Diag.Error("tiktok", "couldn't read a message (" + ex.Message + "): " + (text.Length > 300 ? text.Substring(0, 300) + "..." : text));
+            return;
+        }
+        List<KeyValuePair<string, Dictionary<string, object>>> events = Events(root);
+        if (events.Count == 0)
+        {
+            // JSON, but not the {type, data} events we expect - exactly what's needed to fix the reader
+            Diag.Count("tiktok.msg.(no events)");
+            if (Diag.WantsSample("(no events)")) Diag.Sample("(no events)", text);
+        }
+        foreach (KeyValuePair<string, Dictionary<string, object>> ev in events)
+        {
+            Diag.Count("tiktok.msg." + ev.Key);
+            if (Diag.WantsSample(ev.Key)) { try { Diag.Sample(ev.Key, json.Serialize(ev.Value)); } catch { } }
+            Dispatch(ev.Key, ev.Value);
+        }
     }
 
     // Finds {"type": ..., "data": {...}} events anywhere in a message (single or bundled).
@@ -286,16 +314,16 @@ public class TikTokLive
         switch (type)
         {
             case "WebcastGiftMessage":
-                Send(ParseGift(data));
+                Send(ParseGift(data), type);
                 break;
             case "WebcastSocialMessage":
-                Send(ParseSocial(data));
+                Send(ParseSocial(data), type);
                 break;
             case "WebcastMemberMessage":
-                Send(ParseJoin(data));
+                Send(ParseJoin(data), type);
                 break;
             case "WebcastLikeMessage":
-                Send(ParseLikes(data));
+                Send(ParseLikes(data), type);
                 break;
             case "room.status":
                 string state = Str(data, "state");
@@ -337,9 +365,15 @@ public class TikTokLive
         return g;
     }
 
-    void Send(LiveEvent e)
+    void Send(LiveEvent e, string type)
     {
-        if (e != null) app.Ui(delegate { app.Engine.OnEvent(e); });
+        if (e == null) { Diag.Count("tiktok.ignored." + type); return; }
+        if (Diag.Verbose)
+            Diag.Write("tiktok", type + " -> " + e.Type + " from " + e.Who +
+                       (e.Type == LiveEvent.Gift ? ": \"" + e.GiftName + "\" id " + e.GiftId + ", " + e.Coins + " coins, repeat " + e.RepeatCount +
+                                                   (e.RepeatEnd ? " (end)" : "") + (e.Streakable ? ", combo" : "") : "") +
+                       (e.Type == LiveEvent.Likes ? ": " + e.RepeatCount + " likes" : ""));
+        app.Ui(delegate { app.Engine.OnEvent(e); });
     }
 
     static LiveEvent WithUser(Dictionary<string, object> data, string type)

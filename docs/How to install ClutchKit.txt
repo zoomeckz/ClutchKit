@@ -103,6 +103,20 @@ Tips:
 - Games with strict anti-cheat (e.g. Valorant, Fortnite) may ignore pressed keys.
 
 
+SOMETHING NOT WORKING?
+----------------------
+Open the "Debug" page:
+1. Tick "Detailed logging (debug mode)".
+2. Make the problem happen (e.g. connect and send a gift, press the key, play the sound).
+3. Click "Save debug report". It's saved in ClutchKit's "debug" folder and copied, so you
+   can paste it straight into a bug report (link at the bottom of the page).
+"Check layout in all languages" looks for text that is cut off and saves a screenshot of
+every page in every language (debug\layout).
+If ClutchKit ever crashes, a crash report is saved in the same folder.
+The report never contains your Euler Stream key, but it does contain the activity log,
+which has viewer names from your LIVE. Nothing is sent anywhere unless you share it.
+
+
 UNINSTALL
 ---------
 Windows Settings > Apps > Installed apps > ClutchKit > Uninstall.

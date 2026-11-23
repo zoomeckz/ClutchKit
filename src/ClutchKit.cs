@@ -699,7 +699,28 @@ public class Settings
         b.AppendLine("tiktok.autoConnect=" + AutoConnect);
         b.AppendLine("language=" + Language);
         b.AppendLine("lastPage=" + LastPage);
-        try { File.WriteAllText(path, b.ToString()); } catch { }
+        WriteFile(path, b.ToString());
+    }
+
+    // Writes a file in one go: first to "<file>.tmp", then swapped in. If the PC crashes or loses
+    // power while saving, the old file is still there instead of a half-written one.
+    public static void WriteFile(string path, string text)
+    {
+        string tmp = path + ".tmp";
+        try
+        {
+            File.WriteAllText(tmp, text, new UTF8Encoding(false));
+            if (File.Exists(path))
+            {
+                try { File.Replace(tmp, path, null, true); return; }
+                catch (IOException) { }                 // some drives can't swap files
+                catch (UnauthorizedAccessException) { }
+                File.Copy(tmp, path, true);
+                File.Delete(tmp);
+            }
+            else File.Move(tmp, path);
+        }
+        catch { }
     }
 }
 
@@ -753,8 +774,12 @@ public class App : ApplicationContext
     MainForm main;
     CaptureForm capture;
     OverlayServer server;
+    readonly System.Windows.Forms.Timer saveTimer = new System.Windows.Forms.Timer();
+    bool settingsDirty, countsDirty;
+    volatile byte[] stateBytes = new byte[] { (byte)'{', (byte)'}' };
 
     public string StateJson { get { return stateJson; } }
+    public byte[] StateBytes { get { return stateBytes; } }   // StateJson as UTF-8, ready for the overlay server
     public int FirstCount { get { return firstCount; } }
     public bool KeysOk { get { return hook != IntPtr.Zero; } }
     public MainForm Main { get { return main; } }
@@ -768,6 +793,10 @@ public class App : ApplicationContext
         SettingsFile = Path.Combine(folder, "settings.ini");
         IntPtr forceHandle = marshal.Handle;   // lets key presses be handed to this thread
         AppIcon = AppIcons.Full();
+        saveTimer.Interval = 400;
+        saveTimer.Tick += delegate { SaveNow(); };
+        SystemEvents.SessionEnding += delegate { SaveNow(); };   // Windows shuts down / signs out
+        Application.ApplicationExit += delegate { SaveNow(); };
 
         S = Settings.Load(SettingsFile);
         L.Use(L.Resolve(S.Language));
@@ -839,8 +868,26 @@ public class App : ApplicationContext
     {
         StringBuilder b = new StringBuilder();
         foreach (Counter c in S.Counters) b.Append(c.Id).Append('=').Append(c.Count).Append("\r\n");
-        try { File.WriteAllText(CountsFile, b.ToString()); } catch { }
+        Settings.WriteFile(CountsFile, b.ToString());
     }
+
+    // Saving is bundled: many changes in a row (typing a name, a x100 combo pressing +1) write the
+    // files at most every 0.4 s instead of on every change. ExitApp saves whatever is left.
+    void SaveSoon(bool settings, bool counts)
+    {
+        settingsDirty |= settings;
+        countsDirty |= counts;
+        if (!saveTimer.Enabled) saveTimer.Start();
+    }
+
+    void SaveNow()
+    {
+        saveTimer.Stop();
+        if (settingsDirty) { settingsDirty = false; S.Save(SettingsFile); }
+        if (countsDirty) { countsDirty = false; SaveCounts(); }
+    }
+
+    public void SaveSettingsSoon() { SaveSoon(true, false); }
 
     public List<Counter> VisibleCounters()
     {
@@ -869,7 +916,7 @@ public class App : ApplicationContext
         c.Count = value;
         c.Seq++;
         c.AnimStart = DateTime.Now;
-        SaveCounts();
+        SaveSoon(false, true);
         BuildState();
         UpdateTray();
         Raise(CountChanged);
@@ -888,7 +935,7 @@ public class App : ApplicationContext
         c.Name = L.F("Counter {0}", S.Counters.Count + 1) + ":";
         if (S.Counters.Count > 0) c.Style = S.Counters[0].Style.Clone();   // start with the same look as the first one
         S.Counters.Add(c);
-        SaveCounts();
+        SaveSoon(false, true);
         ApplySettings();
         return c;
     }
@@ -897,7 +944,7 @@ public class App : ApplicationContext
     {
         if (S.Counters.Count <= 1) return;
         S.Counters.Remove(c);
-        SaveCounts();
+        SaveSoon(false, true);
         ApplySettings();
         Raise(CountChanged);
     }
@@ -917,7 +964,7 @@ public class App : ApplicationContext
 
     public void ApplySettings()
     {
-        S.Save(SettingsFile);
+        SaveSoon(true, false);
         BuildState();
         UpdateTray();
         Raise(SettingsChanged);
@@ -950,7 +997,7 @@ public class App : ApplicationContext
         if (S.ActionsOn == on) return;
         S.ActionsOn = on;
         if (!on) Engine.Clear();
-        S.Save(SettingsFile);
+        SaveSoon(true, false);
         Log(on ? L.T("Actions turned on.") : L.T("Actions paused - nothing will play or press keys."));
         Raise(ActionsToggled);
     }
@@ -1094,6 +1141,7 @@ public class App : ApplicationContext
         }
         b.Append("]}");
         stateJson = b.ToString();
+        stateBytes = Encoding.UTF8.GetBytes(stateJson);   // the overlay asks ~7 times a second; encode once per change
         firstCount = S.Counters.Count > 0 ? S.Counters[0].Count : 0;
     }
 
@@ -1201,7 +1249,7 @@ public class App : ApplicationContext
         if (!S.TrayHintShown)
         {
             S.TrayHintShown = true;
-            S.Save(SettingsFile);
+            SaveSoon(true, false);
             Notify(L.T("Still counting"), L.T("ClutchKit keeps running here by the clock. Double-click the red icon to open it, right-click to exit."), ToolTipIcon.Info);
         }
     }
@@ -1275,7 +1323,7 @@ public class App : ApplicationContext
     {
         S.Language = setting;
         S.LastPage = 0;   // come back to the General page
-        S.Save(SettingsFile);
+        SaveSoon(true, false);
         L.Use(L.Resolve(setting));
         BuildMenu();
         UpdateTray();
@@ -1295,15 +1343,23 @@ public class App : ApplicationContext
     void UpdateTray()
     {
         if (tray == null) return;
-        foreach (ToolStripItem i in countItems) { menu.Items.Remove(i); i.Dispose(); }
-        countItems.Clear();
-        int pos = 0;
-        foreach (Counter c in S.Counters)
+        if (countItems.Count != S.Counters.Count)
         {
-            ToolStripMenuItem item = new ToolStripMenuItem(c.DisplayName + ": " + c.Count);
-            item.Enabled = false;
-            menu.Items.Insert(pos++, item);
-            countItems.Add(item);
+            // a counter was added or removed: make one menu line per counter again
+            foreach (ToolStripItem i in countItems) { menu.Items.Remove(i); i.Dispose(); }
+            countItems.Clear();
+            for (int pos = 0; pos < S.Counters.Count; pos++)
+            {
+                ToolStripMenuItem item = new ToolStripMenuItem();
+                item.Enabled = false;
+                menu.Items.Insert(pos, item);
+                countItems.Add(item);
+            }
+        }
+        for (int i = 0; i < countItems.Count; i++)
+        {
+            string text = S.Counters[i].DisplayName + ": " + S.Counters[i].Count;
+            if (countItems[i].Text != text) countItems[i].Text = text;
         }
         captureItem.Visible = S.Mode == "window";
         string tip = "ClutchKit";
@@ -1314,6 +1370,8 @@ public class App : ApplicationContext
     public void ExitApp()
     {
         if (capture != null && !capture.IsDisposed) capture.RememberBounds();
+        saveTimer.Stop();
+        settingsDirty = countsDirty = false;
         S.Save(SettingsFile);
         SaveCounts();
         if (hook != IntPtr.Zero) { UnhookWindowsHookEx(hook); hook = IntPtr.Zero; }
@@ -1433,6 +1491,7 @@ public class OverlayServer
     readonly int port;
     readonly App app;
     TcpListener v4, v6;
+    static readonly byte[] ScriptBytes = Encoding.UTF8.GetBytes(Overlay.Script());   // never changes while running
 
     public OverlayServer(int port, App app) { this.port = port; this.app = app; }
 
@@ -1509,14 +1568,14 @@ public class OverlayServer
                     int q = path.IndexOf('?');
                     if (q >= 0) path = path.Substring(0, q);
 
-                    string status = "200 OK", type = "application/json", body;
-                    if (method == "OPTIONS") { status = "204 No Content"; body = ""; }
-                    else if (path == "/api/state") body = app.StateJson;
-                    else if (path == "/api/count") body = "{\"count\":" + app.FirstCount + "}";   // links from older versions
-                    else if (path == "/overlay.js") { type = "application/javascript"; body = Overlay.Script(); }
-                    else { status = "404 Not Found"; type = "text/plain"; body = "Not found"; }
+                    string status = "200 OK", type = "application/json";
+                    byte[] bytes;
+                    if (method == "OPTIONS") { status = "204 No Content"; bytes = new byte[0]; }
+                    else if (path == "/api/state") bytes = app.StateBytes;
+                    else if (path == "/api/count") bytes = Encoding.UTF8.GetBytes("{\"count\":" + app.FirstCount + "}");   // links from older versions
+                    else if (path == "/overlay.js") { type = "application/javascript"; bytes = ScriptBytes; }
+                    else { status = "404 Not Found"; type = "text/plain"; bytes = Encoding.UTF8.GetBytes("Not found"); }
 
-                    byte[] bytes = Encoding.UTF8.GetBytes(body);
                     string head = "HTTP/1.1 " + status + "\r\n" +
                                   "Content-Type: " + type + "; charset=utf-8\r\n" +
                                   "Content-Length: " + bytes.Length + "\r\n" +
@@ -1888,7 +1947,7 @@ public class CaptureForm : Form
         if (WindowState == FormWindowState.Normal) app.S.CaptureBounds = Bounds;
     }
 
-    protected override void OnResizeEnd(EventArgs e) { base.OnResizeEnd(e); RememberBounds(); app.S.Save(app.SettingsFile); }
+    protected override void OnResizeEnd(EventArgs e) { base.OnResizeEnd(e); RememberBounds(); app.SaveSettingsSoon(); }
 
     protected override void OnFormClosing(FormClosingEventArgs e)
     {
@@ -1994,7 +2053,29 @@ public static class UI
         return (int)Math.Round(v * dpi / 96f);
     }
 
-    public static Font F(float pt, FontStyle st) { return new Font("Segoe UI", pt, st); }
+    // Fonts are shared: one per size and style, instead of a new font (a Windows GDI handle) for every
+    // label and button - the Actions list alone makes hundreds of controls. Never dispose these.
+    static readonly Dictionary<int, Font> fonts = new Dictionary<int, Font>();
+
+    public static Font F(float pt, FontStyle st)
+    {
+        int key = (int)Math.Round(pt * 10) * 16 + (int)st;
+        Font f;
+        lock (fonts)
+        {
+            if (!fonts.TryGetValue(key, out f)) { f = new Font("Segoe UI", pt, st); fonts[key] = f; }
+        }
+        return f;
+    }
+
+    // Removes and frees every control in a container (faster than disposing them one by one from the front).
+    public static void ClearControls(Control host)
+    {
+        Control[] old = new Control[host.Controls.Count];
+        host.Controls.CopyTo(old, 0);
+        host.Controls.Clear();
+        foreach (Control c in old) c.Dispose();
+    }
 
     public static Label Lbl(Control parent, string text, int x, int y, int w, float pt, Color color, FontStyle st)
     {
@@ -2345,7 +2426,7 @@ public partial class MainForm : Form
         if (app.S.LastPage != index && !loading)
         {
             app.S.LastPage = index;
-            app.S.Save(app.SettingsFile);
+            app.SaveSettingsSoon();
         }
     }
 
@@ -2381,7 +2462,7 @@ public partial class MainForm : Form
     {
         CancelCapture();
         cardsHost.SuspendLayout();
-        while (cardsHost.Controls.Count > 0) cardsHost.Controls[0].Dispose();
+        UI.ClearControls(cardsHost);
         cards.Clear();
         int y = 0;
         foreach (Counter c in app.S.Counters)

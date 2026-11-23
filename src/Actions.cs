@@ -95,14 +95,33 @@ public class GiftRule
 
     public bool AnyGift { get { string g = Gifts.Trim(); return g.Length == 0 || g == "*"; } }
 
+    // The gift names, split once per change of Gifts (not for every event).
+    string giftsParsed;
+    string[] giftList;
+    string[] GiftList
+    {
+        get
+        {
+            if (!ReferenceEquals(giftsParsed, Gifts))
+            {
+                List<string> l = new List<string>();
+                foreach (string part in Gifts.Split(',')) { string t = part.Trim(); if (t.Length > 0) l.Add(t); }
+                giftList = l.ToArray();
+                giftsParsed = Gifts;
+            }
+            return giftList;
+        }
+    }
+
     public bool Matches(LiveEvent e)
     {
         if (!Enabled || e.Type != Trigger) return false;
         if (Trigger != LiveEvent.Gift) return true;
         if (MinCoins > 0 && e.Coins < MinCoins) return false;
         if (AnyGift) return true;
-        foreach (string part in Gifts.Split(','))
-            if (part.Trim().Length > 0 && string.Equals(part.Trim(), e.GiftName.Trim(), StringComparison.OrdinalIgnoreCase)) return true;
+        string name = e.GiftName.Trim();
+        foreach (string g in GiftList)
+            if (string.Equals(g, name, StringComparison.OrdinalIgnoreCase)) return true;
         return false;
     }
 
@@ -228,6 +247,8 @@ public static class KeySender
     static extern bool OpenProcessToken(IntPtr process, uint access, out IntPtr token);
     [DllImport("advapi32.dll", SetLastError = true)]
     static extern bool GetTokenInformation(IntPtr token, int infoClass, out int info, int length, out int returned);
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    static extern bool QueryFullProcessImageName(IntPtr process, int flags, StringBuilder name, ref int size);
 
     const uint INPUT_KEYBOARD = 1;
     const uint KEYEVENTF_EXTENDEDKEY = 0x1, KEYEVENTF_KEYUP = 0x2, KEYEVENTF_UNICODE = 0x4, KEYEVENTF_SCANCODE = 0x8;
@@ -345,12 +366,15 @@ public static class KeySender
         uint pid;
         GetWindowThreadProcessId(GetForegroundWindow(), out pid);
         if (pid == 0) return "";
-        string name = "";
-        try { using (Process p = Process.GetProcessById((int)pid)) name = p.ProcessName; } catch { }
         IntPtr h = OpenProcess(0x1000 /* PROCESS_QUERY_LIMITED_INFORMATION */, false, pid);
-        if (h == IntPtr.Zero) return name;
+        if (h == IntPtr.Zero) return SlowName(pid);   // e.g. protected by anti-cheat
+        string name = "";
         try
         {
+            // the name straight from the process handle (Process.GetProcessById lists every process on the PC)
+            StringBuilder path = new StringBuilder(1024);
+            int size = path.Capacity;
+            name = QueryFullProcessImageName(h, 0, path, ref size) ? Path.GetFileNameWithoutExtension(path.ToString()) : SlowName(pid);
             IntPtr token;
             if (!OpenProcessToken(h, 0x0008 /* TOKEN_QUERY */, out token)) { elevated = 1; return name; }
             try
@@ -362,6 +386,11 @@ public static class KeySender
         }
         finally { CloseHandle(h); }
         return name;
+    }
+
+    static string SlowName(uint pid)
+    {
+        try { using (Process p = Process.GetProcessById((int)pid)) return p.ProcessName; } catch { return ""; }
     }
 
     public static string CleanProcessName(string s)
@@ -430,7 +459,7 @@ public static class SoundPlayer
 // worker threads (keys/text, sounds), one at a time each, so a 99x combo can't flood anything.
 public class GiftEngine
 {
-    class Job { public GiftRule Rule; public LiveEvent Event; }
+    class Job { public GiftRule Rule; public LiveEvent Event; public int Gen; }
     class Streak { public int Count; public DateTime Seen; }
 
     // one queue + worker thread
@@ -445,7 +474,9 @@ public class GiftEngine
     readonly Lane keys = new Lane(), sounds = new Lane();
     readonly Dictionary<string, Streak> streaks = new Dictionary<string, Streak>();
     readonly Dictionary<int, DateTime> lastRun = new Dictionary<int, DateTime>();
-    volatile bool stopSound;
+    volatile int generation;   // goes up on "Stop and clear": jobs from before stop (also the one running)
+    int queuePosted;           // 1 = a queue update is already on its way to the UI thread
+    DateTime lastSweep = DateTime.UtcNow;
     long likeTotal;
     string warnedProcess = "";
 
@@ -470,14 +501,17 @@ public class GiftEngine
     public int Waiting { get { lock (gate) return keys.Jobs.Count + sounds.Jobs.Count; } }
     public long LikeTotal { get { return likeTotal; } }
 
-    // Empties both queues and stops the sound that is playing.
+    // Empties both queues and stops what is running (the sound that plays, the rest of a x10 key action).
     public void Clear()
     {
-        lock (gate) { keys.Jobs.Clear(); sounds.Jobs.Clear(); }
-        stopSound = true;
-        sounds.Wake.Set();
+        lock (gate) { keys.Jobs.Clear(); sounds.Jobs.Clear(); generation++; }
         RaiseQueue();
     }
+
+    // A new LIVE starts counting likes from 0 (for "every N likes").
+    public void ResetLikes() { likeTotal = 0; }
+
+    bool Cancelled(Job j) { return j.Gen != generation; }
 
     // How many new gifts this event adds. Combo gifts arrive several times (x1, x2, ... and a final
     // message), so only the increase since the last message for that combo counts.
@@ -490,9 +524,14 @@ public class GiftEngine
         }
         string key = g.UserId + "|" + g.User + "|" + g.GiftId + "|" + g.GiftName + "|" + g.GroupId;
         DateTime now = DateTime.UtcNow;
-        List<string> old = new List<string>();
-        foreach (KeyValuePair<string, Streak> kv in streaks) if ((now - kv.Value.Seen).TotalMinutes > 5) old.Add(kv.Key);
-        foreach (string k in old) streaks.Remove(k);
+        if ((now - lastSweep).TotalSeconds > 60)
+        {
+            // forget combos that never got their closing message
+            lastSweep = now;
+            List<string> old = new List<string>();
+            foreach (KeyValuePair<string, Streak> kv in streaks) if ((now - kv.Value.Seen).TotalMinutes > 5) old.Add(kv.Key);
+            foreach (string k in old) streaks.Remove(k);
+        }
 
         Streak s;
         firstOfSend = !streaks.TryGetValue(key, out s);
@@ -572,11 +611,13 @@ public class GiftEngine
                 if (lastRun.TryGetValue(r.Id, out last) && (now - last).TotalSeconds < r.CooldownSec) { cooling++; continue; }
                 runs = 1;
             }
-            lastRun[r.Id] = now;
+            int ran = 0;
             for (int i = 0; i < runs; i++)
             {
-                if (Enqueue(r, e)) queued++; else dropped++;
+                if (Enqueue(r, e)) ran++; else dropped++;
             }
+            if (ran > 0) lastRun[r.Id] = now;   // a skipped action (queue full) doesn't start its cooldown
+            queued += ran;
         }
         if (queued == 0 && dropped == 0)
             return cooling > 0 && e.Type != LiveEvent.Join ? L.T("waiting for cooldown") : null;
@@ -602,6 +643,7 @@ public class GiftEngine
             Job j = new Job();
             j.Rule = r.Clone();   // the settings window may change the rule while it waits
             j.Event = e;
+            j.Gen = generation;
             lane.Jobs.Enqueue(j);
         }
         lane.Wake.Set();
@@ -609,9 +651,16 @@ public class GiftEngine
         return true;
     }
 
+    // Tells the window the queue changed - at most one update waits at a time, so a x100 combo
+    // doesn't send the window 200 updates.
     void RaiseQueue()
     {
-        app.Ui(delegate { if (QueueChanged != null) QueueChanged(this, EventArgs.Empty); });
+        if (Interlocked.Exchange(ref queuePosted, 1) == 1) return;
+        app.Ui(delegate
+        {
+            Interlocked.Exchange(ref queuePosted, 0);
+            if (QueueChanged != null) QueueChanged(this, EventArgs.Empty);
+        });
     }
 
     void Worker(Lane lane)
@@ -627,7 +676,6 @@ public class GiftEngine
                     if (lane.Jobs.Count == 0) break;
                     j = lane.Jobs.Dequeue();
                 }
-                if (lane == sounds) stopSound = false;
                 RaiseQueue();
                 try
                 {
@@ -644,12 +692,12 @@ public class GiftEngine
     {
         GiftRule r = j.Rule;
         if (!j.Event.Test && !app.S.ActionsOn) return;
-        for (int i = 0; i < r.Times && !stopSound; i++)
+        for (int i = 0; i < r.Times && !Cancelled(j); i++)
         {
-            string error = SoundPlayer.Play(r.SoundFile, r.Volume, delegate { return stopSound; });
+            string error = SoundPlayer.Play(r.SoundFile, r.Volume, delegate { return Cancelled(j); });
             if (error != null) { app.Log(L.F("Couldn't play {0}: {1}", Path.GetFileName(r.SoundFile), error)); return; }
         }
-        app.Log((stopSound ? L.F("Stopped: {0}", Path.GetFileName(r.SoundFile)) : L.F("Played: {0}", Path.GetFileName(r.SoundFile))) + " (" + Source(j) + ")");
+        app.Log((Cancelled(j) ? L.F("Stopped: {0}", Path.GetFileName(r.SoundFile)) : L.F("Played: {0}", Path.GetFileName(r.SoundFile))) + " (" + Source(j) + ")");
     }
 
     void RunKeys(Job j)
@@ -676,7 +724,7 @@ public class GiftEngine
         int gap = Math.Max(0, app.S.GapMs);
         if (r.Kind == GiftRule.KindText)
         {
-            for (int i = 0; i < r.Times; i++)
+            for (int i = 0; i < r.Times && !Cancelled(j); i++)
             {
                 if (r.Key.IsSet) { ok &= KeySender.Press(r.Key, 40); Thread.Sleep(250); }   // e.g. T opens the chat
                 ok &= KeySender.Type(r.Text, r.Enter);
@@ -685,7 +733,7 @@ public class GiftEngine
         }
         else
         {
-            for (int i = 0; i < r.Times; i++)
+            for (int i = 0; i < r.Times && !Cancelled(j); i++)
             {
                 ok &= KeySender.Press(r.Key, r.HoldMs);
                 Thread.Sleep(gap);

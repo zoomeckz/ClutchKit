@@ -39,11 +39,19 @@ public class TikTokLive
 
     public bool Running { get { return Current != State.Off && Current != State.Error; } }
 
+    // "@name", "name" or a pasted link like "https://www.tiktok.com/@name/live?lang=en" -> "name"
     public static string CleanUser(string s)
     {
         s = (s ?? "").Trim();
-        s = s.Replace("https://www.tiktok.com/", "").Replace("/live", "").Replace("@", "").Trim().Trim('/');
-        return s;
+        int at = s.LastIndexOf('@');
+        if (at >= 0) s = s.Substring(at + 1);
+        else
+        {
+            int t = s.IndexOf("tiktok.com/", StringComparison.OrdinalIgnoreCase);
+            if (t >= 0) s = s.Substring(t + "tiktok.com/".Length);
+        }
+        int end = s.IndexOfAny(new[] { '/', '?', '#', ' ' });
+        return (end >= 0 ? s.Substring(0, end) : s).Trim();
     }
 
     public void Start(string user, string apiKey)
@@ -53,6 +61,7 @@ public class TikTokLive
         apiKey = (apiKey ?? "").Trim();
         if (user.Length == 0) { SetStatus(State.Error, L.T("Enter your TikTok username first.")); return; }
         if (apiKey.Length == 0) { SetStatus(State.Error, L.T("Enter your Euler Stream API key first (it's free - see the link).")); return; }
+        app.Engine.ResetLikes();
         lock (gate)
         {
             User = user;
@@ -176,6 +185,9 @@ public class TikTokLive
 
             byte[] buffer = new byte[64 * 1024];
             MemoryStream message = new MemoryStream();
+            JavaScriptSerializer json = new JavaScriptSerializer();   // one for the whole connection, not one per message
+            json.MaxJsonLength = int.MaxValue;
+            json.RecursionLimit = 256;
             while (socket.State == WebSocketState.Open)
             {
                 WebSocketReceiveResult r = socket.ReceiveAsync(new ArraySegment<byte>(buffer), source.Token).Result;
@@ -189,8 +201,8 @@ public class TikTokLive
                 message.Write(buffer, 0, r.Count);
                 if (message.Length > 16 * 1024 * 1024) message.SetLength(0);   // something is wrong; don't eat memory
                 if (!r.EndOfMessage) continue;
-                byte[] data = message.ToArray();
-                message.SetLength(0);
+                byte[] data = message.GetBuffer();   // no copy; valid up to message.Length
+                int length = (int)message.Length;
                 if (!gotData)
                 {
                     // the first message means TikTok is really connected (not live = closed right away instead)
@@ -198,7 +210,8 @@ public class TikTokLive
                     Report(State.Connected, L.F("Connected - listening to @{0}'s LIVE.", user));
                     app.Log("TikTok LIVE: " + L.F("connected to @{0}.", user));
                 }
-                Handle(data);
+                Handle(data, length, json);
+                message.SetLength(0);
             }
             if (code == -1 && socket.CloseStatus.HasValue)
             {
@@ -220,28 +233,22 @@ public class TikTokLive
 
     // ---------------- messages ----------------
 
-    void Handle(byte[] data)
+    void Handle(byte[] data, int length, JavaScriptSerializer json)
     {
         int i = 0;
-        while (i < data.Length && data[i] <= 32) i++;
-        if (i >= data.Length) return;
+        while (i < length && data[i] <= 32) i++;
+        if (i >= length) return;
         if (data[i] != '{' && data[i] != '[')
         {
             if (!warnedFormat)
             {
                 warnedFormat = true;
-                app.Log("TikTok LIVE: " + L.F("got data in a format ClutchKit doesn't read ({0} bytes). Gifts may not arrive - please report this.", data.Length));
+                app.Log("TikTok LIVE: " + L.F("got data in a format ClutchKit doesn't read ({0} bytes). Gifts may not arrive - please report this.", length));
             }
             return;
         }
         object root;
-        try
-        {
-            JavaScriptSerializer js = new JavaScriptSerializer();
-            js.MaxJsonLength = int.MaxValue;
-            js.RecursionLimit = 256;
-            root = js.DeserializeObject(Encoding.UTF8.GetString(data, i, data.Length - i));
-        }
+        try { root = json.DeserializeObject(Encoding.UTF8.GetString(data, i, length - i)); }
         catch { return; }
         foreach (KeyValuePair<string, Dictionary<string, object>> ev in Events(root)) Dispatch(ev.Key, ev.Value);
     }
@@ -298,7 +305,12 @@ public class TikTokLive
                 else if (state == "error" && Str(data, "message").Length > 0) app.Log("TikTok LIVE: " + Str(data, "message"));
                 break;
             case "WebcastControlMessage":
-                if (Num(data, "action") == 3) { app.Log("TikTok LIVE: " + L.T("the LIVE ended.")); Report(State.Waiting, L.F("@{0}'s LIVE has ended or is offline.", User)); }
+                if (Num(data, "action") == 3)
+                {
+                    app.Log("TikTok LIVE: " + L.T("the LIVE ended."));
+                    app.Ui(delegate { app.Engine.ResetLikes(); });   // the next LIVE counts likes from 0
+                    Report(State.Waiting, L.F("@{0}'s LIVE has ended or is offline.", User));
+                }
                 break;
             case "decodeError":
                 app.Log("TikTok LIVE: " + L.F("Euler Stream couldn't read a message ({0}).", Str(data, "message")));

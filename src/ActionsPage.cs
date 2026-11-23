@@ -200,15 +200,26 @@ public partial class MainForm
         int width = rulesHost.Width;
         Control focus = null;
 
+        // sort the actions into their topics once (not once per topic)
+        Dictionary<int, List<GiftRule>> byGroup = new Dictionary<int, List<GiftRule>>();
+        foreach (GiftRule r in app.S.Rules)
+        {
+            List<GiftRule> l;
+            if (!byGroup.TryGetValue(r.GroupId, out l)) byGroup[r.GroupId] = l = new List<GiftRule>();
+            l.Add(r);
+        }
+
         rulesHost.SuspendLayout();
-        while (rulesHost.Controls.Count > 0) rulesHost.Controls[0].Dispose();
+        UI.ClearControls(rulesHost);
         int y = 0, shown = 0;
         foreach (RuleGroup g in app.S.Groups)
         {
-            List<GiftRule> rules = app.S.Rules.FindAll(delegate (GiftRule r) { return r.GroupId == g.Id && RuleMatches(r, g, q); });
+            List<GiftRule> all;
+            if (!byGroup.TryGetValue(g.Id, out all)) all = new List<GiftRule>();
+            RuleGroup group = g;
+            List<GiftRule> rules = q.Length == 0 ? all : all.FindAll(delegate (GiftRule r) { return RuleMatches(r, group, q); });
             if (q.Length > 0 && rules.Count == 0) continue;
-            int total = app.S.Rules.FindAll(delegate (GiftRule r) { return r.GroupId == g.Id; }).Count;
-            Panel bar = BuildGroupBar(g, total, width);
+            Panel bar = BuildGroupBar(g, all.Count, width);
             bar.Location = new Point(0, y);
             rulesHost.Controls.Add(bar);
             y += bar.Height + UI.D(6);
@@ -806,7 +817,7 @@ public partial class MainForm
         l.HorizontalScrollbar = true;
         l.Location = new Point(UI.D(x), UI.D(y));
         l.Size = new Size(UI.D(w), UI.D(h));
-        foreach (string line in app.LogLines) l.Items.Add(line);
+        l.Items.AddRange(app.LogLines.ToArray());
         if (l.Items.Count > 0) l.TopIndex = l.Items.Count - 1;
         parent.Controls.Add(l);
         logBoxes.RemoveAll(delegate (ListBox o) { return o.IsDisposed; });
@@ -820,9 +831,11 @@ public partial class MainForm
         foreach (ListBox l in logBoxes.ToArray())
         {
             if (l.IsDisposed) continue;
+            l.BeginUpdate();   // one repaint per line, not one per change
             l.Items.Add(line);
             while (l.Items.Count > 300) l.Items.RemoveAt(0);
             l.TopIndex = l.Items.Count - 1;
+            l.EndUpdate();
         }
     }
 

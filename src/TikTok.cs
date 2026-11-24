@@ -85,6 +85,7 @@ public class TikTokLive
             try { if (cts != null) cts.Cancel(); } catch { }
             try { if (ws != null) ws.Abort(); } catch { }
         }
+        app.Ui(delegate { if (app.W != null) app.W.SetViewers(Brand.TikTok, -1); });
         SetStatus(State.Off, L.T("Not connected."));
     }
 
@@ -329,6 +330,12 @@ public class TikTokLive
             case "WebcastChatMessage":
                 Send(ParseChat(data), type);
                 break;
+            case "WebcastRoomUserSeqMessage":   // how many people watch right now
+                {
+                    long viewers = First(Num(data, "viewerCount"), Num(data, "total"));
+                    if (viewers > 0) app.Ui(delegate { app.W.SetViewers(Brand.TikTok, (int)Math.Min(int.MaxValue, viewers)); });
+                    break;
+                }
             case "room.status":
                 string state = Str(data, "state");
                 if (state == "connected") Report(State.Connected, L.F("Connected - listening to @{0}'s LIVE.", User));
@@ -340,7 +347,7 @@ public class TikTokLive
                 if (Num(data, "action") == 3)
                 {
                     app.Log("TikTok LIVE: " + L.T("the LIVE ended."));
-                    app.Ui(delegate { app.Engine.ResetLikes(); app.W.LiveEnded(); });   // the next LIVE counts from 0
+                    app.Ui(delegate { app.Engine.ResetLikes(); app.W.LiveEnded(); app.W.SetViewers(Brand.TikTok, 0); });   // the next LIVE counts from 0
                     Report(State.Waiting, L.F("@{0}'s LIVE has ended or is offline.", User));
                 }
                 break;

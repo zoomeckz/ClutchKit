@@ -13,7 +13,7 @@ using System.Windows.Forms;
 
 public partial class MainForm
 {
-    static readonly string[] PageFiles = { "1-general", "2-counters", "3-widgets", "4-actions", "5-tiktok", "6-overlay", "7-obs", "8-settings", "9-debug" };
+    static readonly string[] PageFiles = { "1-general", "2-counters", "3-widgets", "4-actions", "5-tiktok", "6-twitch", "7-overlay", "8-obs", "9-settings", "10-debug" };
     static Font mono;
 
     Timer debugTimer;
@@ -143,6 +143,7 @@ public partial class MainForm
         }
         catch { }
         string original = L.Code;
+        float zoom = UI.Zoom;   // the check always builds the window at 100 %
         StringBuilder report = new StringBuilder();
         report.AppendLine("Layout check " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + ", " + UI.D(100) + "% scaling, " + app.S.Rules.Count + " actions");
         int total = 0;
@@ -150,6 +151,7 @@ public partial class MainForm
         Cursor.Current = Cursors.WaitCursor;
         try
         {
+            UI.Zoom = 1f;
             foreach (string code in L.Codes)
             {
                 L.Use(code);
@@ -177,6 +179,7 @@ public partial class MainForm
         finally
         {
             L.Use(original);
+            UI.Zoom = zoom;
             Cursor.Current = before;
         }
         Diag.LastLayoutCheck = report.ToString();

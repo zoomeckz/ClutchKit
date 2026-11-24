@@ -50,6 +50,12 @@ public partial class MainForm
             which.Items.Add(new ObsView { View = "timer", Name = "timer", Size = "600 x 200", Text = L.T("Subathon timer") });
             which.Items.Add(new ObsView { View = "top:gifters", Name = "top", Size = "500 x 500", Text = L.T("Top gifters") });
             which.Items.Add(new ObsView { View = "top:likers", Name = "top", Size = "500 x 500", Text = L.T("Top likers") });
+            which.Items.Add(new ObsView { View = "alerts", Name = "alerts", Size = "800 x 300", Text = L.T("Alerts (TikTok + Twitch)") });
+            if (s.Viewers.Count > 0)
+                which.Items.Add(new ObsView { View = "viewers", Name = "viewers", Size = "600 x 300", Text = L.T("Viewer counts (all in one)") });
+            foreach (ViewerCounter v in s.Viewers)
+                which.Items.Add(new ObsView { View = "viewers:" + v.Id, Name = "viewers", Size = "500 x 120",
+                                              Text = L.F("Viewer count: {0}", app.W.ViewerText(v)) });
             int at = 0;
             for (int i = 0; keep != null && i < which.Items.Count; i++)
                 if (((ObsView)which.Items[i]).View == keep.View) at = i;

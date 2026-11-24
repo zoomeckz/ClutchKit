@@ -1,8 +1,9 @@
-ClutchKit 3.4 - stream toolkit for TikTok LIVE Studio and OBS Studio
-=====================================================================
+ClutchKit 3.5 - stream toolkit for TikTok LIVE Studio, OBS Studio and Twitch
+============================================================================
 Counters for anything you want to track (deaths, wins, kills, attempts...), each with
 its own hotkeys, shown live on stream with your own font, colors and animations.
-Widgets: goal bars, a subathon timer and top gifter / liker lists.
+Widgets: goal bars, a subathon timer, top gifter / liker lists, viewer counts and one
+alerts overlay for TikTok and Twitch.
 Actions: gifts, follows, shares, joins, likes and chat commands play sound alerts,
 press keys in your game, change your counters or control OBS.
 
@@ -37,6 +38,14 @@ In ClutchKit, open "Display":
     Pick "Capture window", then in LIVE Studio: Add source > Window capture >
     "ClutchKit - Overlay". Keep that window open (it can sit behind your
     game, just don't minimize it).
+
+
+TWITCH
+------
+On the "Twitch" page, type your channel name and click "Connect" (no login needed).
+ClutchKit then reads your Twitch chat, bits, subs and raids (for chat commands and the
+alerts overlay) and your Twitch viewer count. It never writes in your chat. Follows
+need a Twitch login, so they are not included.
 
 
 USING OBS STUDIO INSTEAD
@@ -79,8 +88,8 @@ LANGUAGE: ClutchKit starts in your Windows language (English, Español, Portugu�
 Bahasa Indonesia, Türkçe, Deutsch, Français, Tiếng Việt). Change it on the "General" page.
 
 
-WIDGETS (GOAL BARS, SUBATHON TIMER, TOP LISTS)
-----------------------------------------------
+WIDGETS (GOALS, SUBATHON TIMER, TOP LISTS, VIEWER COUNTS, ALERTS)
+-----------------------------------------------------------------
 On the "Widgets" page. Each widget is its own Link source, so you can put it anywhere:
 click its "Copy link", then in LIVE Studio: Add source > Link > paste. "Preview" shows it
 in your web browser. Widgets use the font and colors of your first counter.
@@ -90,6 +99,11 @@ in your web browser. Widgets use the font and colors of your first counter.
                 time. +5 min / -5 min, Pause, Reset. If ClutchKit closes while it runs,
                 it waits paused until you press Go on.
   Top lists     top gifters (coins) and top likers, for this LIVE or all time.
+  Viewer counts TikTok, Twitch or both added together, with your own text before and
+                after the number (e.g. "Twitch:" 23). Add as many as you like; each has
+                its own link, or use the "all in one" link to show them one under the other.
+  Alerts        gifts, follows, shares (TikTok) and subs, gifted subs, bits, raids
+                (Twitch) pop up one after another. "Test alert" sends two test pop-ups.
 This LIVE's top lists and goals start over by themselves when your next LIVE starts
 (or click "New LIVE: start over"). Goals, timer and top lists need the TikTok LIVE
 connection (see below), except goals that show a counter.
@@ -185,5 +199,11 @@ connect: your TikTok username and Euler Stream key go to Euler Stream, which
 sends back your LIVE's gifts. The key is saved in settings.ini on your PC.
 The OBS connection (only if you turn it on) goes to the OBS address you enter, normally
 this PC. Its password is saved in settings.ini too.
+The Twitch connection (only if you turn it on) reads your channel's public chat from
+Twitch, and asks decapi.me (a free service) for your viewer count - only the channel
+name is sent.
+
+SETTINGS WINDOW: drag its edge or maximize it and the text grows or shrinks to fit.
+Settings > "Scale text with the window size" and "Smooth scrolling" turn these off.
 The top lists keep viewer names and their coins/likes in leaderboard.txt and live.txt
 on your PC only ("Clear" on the Widgets page empties them).

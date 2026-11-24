@@ -310,6 +310,8 @@ public static class Diag
         b.AppendLine("TikTok: " + a.TikTok.Current + " - " + a.TikTok.Detail);
         b.AppendLine("TikTok messages: " + CountsWith("tiktok.msg."));
         b.AppendLine("OBS: " + a.Obs.Current + " - " + a.Obs.Detail + ", actions done " + Get("obs.actions") + ", failed " + Get("obs.actions.failed"));
+        b.AppendLine("Twitch: " + a.Twitch.Current + " - " + a.Twitch.Detail + ", chat " + Get("twitch.msg.chat"));
+        b.AppendLine("Viewers: TikTok " + a.W.TikTokViewers + ", Twitch " + a.W.TwitchViewers + "; alerts shown " + Get("alerts.shown"));
         b.AppendLine("Events: " + CountsWith("event."));
         b.AppendLine("Actions queued " + Get("actions.queued") + ", skipped (queue full) " + Get("actions.dropped") + ", cooling down " + Get("actions.cooling") +
                      ", waiting now " + a.Engine.Waiting);
@@ -366,6 +368,13 @@ public static class Diag
         b.AppendLine("Messages by type: " + CountsWith("tiktok.msg."));
         b.AppendLine("Messages ignored: " + CountsWith("tiktok.ignored."));
         b.AppendLine("Events: " + CountsWith("event."));
+
+        b.AppendLine();
+        b.AppendLine("== Twitch ==");
+        b.AppendLine("State: " + a.Twitch.Current + " - " + Redact(a.Twitch.Detail));
+        b.AppendLine("Channel: " + (s.TwitchChannel.Length > 0 ? s.TwitchChannel : "(none)") + ", connect automatically: " + YesNo(s.TwitchAuto));
+        b.AppendLine("Connection attempts: " + Get("twitch.connects") + ", connected: " + Get("twitch.connected") + ", viewer count: " + NoteOf("twitch.viewers"));
+        b.AppendLine("Messages: " + CountsWith("twitch.msg."));
 
         b.AppendLine();
         b.AppendLine("== OBS ==");

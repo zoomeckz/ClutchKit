@@ -1,7 +1,8 @@
 # ClutchKit
 
-Stream toolkit for **TikTok LIVE Studio** and **OBS Studio** on Windows: on-stream **counters** (deaths, wins, kills, attempts, ...)
-that you change with hotkeys while you play, **stream widgets** (goal bars, a subathon timer, top gifters), and
+Stream toolkit for **TikTok LIVE Studio**, **OBS Studio** and **Twitch** on Windows: on-stream **counters** (deaths, wins, kills, attempts, ...)
+that you change with hotkeys while you play, **stream widgets** (goal bars, a subathon timer, top gifters, viewer counts,
+one overlay for TikTok and Twitch alerts), and
 **actions**: gifts, follows, shares, joins, likes and chat commands play sound alerts, press keys in your game,
 change your counters or control OBS.
 
@@ -18,6 +19,9 @@ change your counters or control OBS.
   (e.g. +1000) so the bar keeps going
 - A subathon timer: gifts (per coin), follows, shares and likes add time; start, pause, +/- 5 min, a maximum
 - Top gifter and top liker lists, for this LIVE or all time
+- Viewer counts: TikTok, Twitch or both added together, each with your own text ("Twitch: 23", "TikTok: 44"); several
+  at once, each as its own source or all in one
+- One alerts overlay for TikTok and Twitch: gifts (with a minimum), follows, shares, subs, gifted subs, bits and raids
 - Each widget is its own Link source in LIVE Studio, so you can place it anywhere; "Preview" shows it in your browser
 - This LIVE's lists and goals start over by themselves when your next LIVE starts
 
@@ -49,6 +53,16 @@ change your counters or control OBS.
 - Actions control OBS through its built-in WebSocket server (OBS 28 or newer, protocol v5); scenes and sources
   are listed in the action once connected
 - Connects automatically if you want, and waits while OBS is closed
+
+**Twitch**
+- Reads chat, bits, subs, gifted subs and raids through Twitch's own chat, without a login (ClutchKit never writes in chat)
+- Twitch chat commands run the same actions as TikTok chat commands
+- Viewer count from [decapi.me](https://decapi.me) (only the channel name is sent); follows need a Twitch login and
+  aren't included
+
+**Settings window**
+- Resizable: text and buttons scale with the window (can be switched off), smooth scrolling (can be switched off)
+- TikTok, Twitch and OBS logos in the menu
 
 **Languages**
 - English, Español, Português (Brasil), Bahasa Indonesia, Türkçe, Deutsch, Français and Tiếng Việt
@@ -99,6 +113,7 @@ This program will not transfer any information to other networked systems unless
 user or the person installing or operating it. The overlay only talks to ClutchKit on your own PC. The only internet
 connection is the TikTok LIVE connection, and only after you press Connect: your TikTok username and Euler Stream
 API key go to Euler Stream. The optional OBS connection only goes to the OBS address you enter (normally this PC).
+The optional Twitch connection reads your channel's public chat from Twitch and asks decapi.me for the viewer count.
 See the [Code signing policy](CODE_SIGNING_POLICY.md) for details.
 
 ## License

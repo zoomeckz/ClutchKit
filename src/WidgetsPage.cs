@@ -12,6 +12,7 @@ public partial class MainForm
     Label widgetMsg, timerLbl, timerStateLbl, topGiftersLbl, topLikersLbl;
     Button timerBtn;
     readonly Dictionary<Goal, Label> goalLabels = new Dictionary<Goal, Label>();
+    readonly Dictionary<ViewerCounter, Label> viewerLabels = new Dictionary<ViewerCounter, Label>();
 
     Panel BuildWidgetsPage()
     {
@@ -124,6 +125,37 @@ public partial class MainForm
         y += 174 + 12;
         topLikersLbl = BuildTopCard(app.S.TopLikers, y);
         y += 174 + 24;
+
+        // ---- viewer counts ----
+        viewerLabels.Clear();
+        UI.Lbl(widgetsHost, L.T("Viewer counts"), 0, y, 200, 11f, UI.Text, FontStyle.Bold);
+        UI.Para(widgetsHost, L.T("TikTok viewers come with the TikTok LIVE connection, Twitch viewers with the Twitch page (every minute)."), 210, y + 2, 422, 40);
+        y += 46;
+        foreach (ViewerCounter v in app.S.Viewers) { BuildViewerCard(v, y); y += 104 + 12; }
+        if (app.S.Viewers.Count > 0)
+        {
+            Panel all = WidgetCard(y, 64);
+            LinkButtons(all, 14, "viewers", "viewers");
+            UI.Para(all, L.T("All viewer counts that are on, in one link (one under the other)."), 342, 16, 274, 40);
+            y += 64 + 12;
+        }
+        if (app.S.Viewers.Count < Settings.MaxViewers)
+        {
+            Button addViewer = UI.Btn(widgetsHost, L.T("+ Add viewer count"), 0, y, 220, 38, true);
+            addViewer.Click += delegate
+            {
+                if (app.AddViewer() != null) { RebuildWidgets(); WidgetMessage(L.T("Added. Pick TikTok, Twitch or both, and the text around the number."), UI.Good); }
+            };
+            y += 38 + 26;
+        }
+        else y += 10;
+
+        // ---- alerts ----
+        UI.Lbl(widgetsHost, L.T("Alerts"), 0, y, 200, 11f, UI.Text, FontStyle.Bold);
+        UI.Para(widgetsHost, L.T("Gifts, follows, subs, bits and raids from TikTok and Twitch pop up in one overlay."), 210, y + 2, 422, 40);
+        y += 46;
+        BuildAlertsCard(y);
+        y += 224 + 24;
 
         widgetsHost.Height = UI.D(y);
         widgetsHost.ResumeLayout();
@@ -293,6 +325,101 @@ public partial class MainForm
         return now;
     }
 
+    void BuildViewerCard(ViewerCounter v, int y)
+    {
+        Panel card = WidgetCard(y, 104);
+        TextBox before = ViewerTextBox(card, 16, v.Before, L.T("text before"));
+        Label value = UI.Lbl(card, "", 164, 16, 90, 12f, UI.Text, FontStyle.Bold);
+        value.TextAlign = ContentAlignment.TopCenter;
+        viewerLabels[v] = value;
+        TextBox after = ViewerTextBox(card, 262, v.After, L.T("text after"));
+        before.TextChanged += delegate { v.Before = before.Text.Trim(); Changed(); app.RefreshState(); };
+        after.TextChanged += delegate { v.After = after.Text.Trim(); Changed(); app.RefreshState(); };
+        ComboBox src = UI.Combo(card, 412, 14, 204);
+        src.Items.AddRange(L.All(ViewerCounter.SourceNames));
+        src.SelectedIndex = Math.Max(0, Array.IndexOf(ViewerCounter.Sources, v.Source));
+        src.SelectedIndexChanged += delegate
+        {
+            string old = ViewerCounter.DefaultBefore(v.Source);
+            v.Source = ViewerCounter.Sources[src.SelectedIndex];
+            if (v.Before.Length == 0 || v.Before == old) before.Text = ViewerCounter.DefaultBefore(v.Source);   // text you didn't change follows
+            Changed();
+            app.RefreshState();
+            OnWidgetsChanged(null, EventArgs.Empty);
+        };
+
+        LinkButtons(card, 58, "viewers:" + v.Id, "viewers");
+        CheckBox show = UI.Check(card, L.T("Show on stream"), 350, 66, v.Visible);
+        show.BackColor = UI.Card;
+        show.CheckedChanged += delegate { v.Visible = show.Checked; Changed(); app.RefreshState(); };
+        Button remove = UI.Btn(card, L.T("Remove"), 516, 58, 100, 36, false);
+        remove.Click += delegate
+        {
+            if (MessageBox.Show(this, L.F("Remove the viewer count \"{0}\"?", app.W.ViewerText(v)), "ClutchKit",
+                    MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+            app.RemoveViewer(v);
+            app.Ui(delegate { if (!IsDisposed) RebuildWidgets(); });
+        };
+    }
+
+    TextBox ViewerTextBox(Control card, int x, string text, string hint)
+    {
+        TextBox box = new TextBox();
+        UI.Style(box);
+        box.BorderStyle = BorderStyle.FixedSingle;
+        box.Text = text;
+        box.MaxLength = 40;
+        box.Location = new Point(UI.D(x), UI.D(14));
+        box.Size = new Size(UI.D(140), UI.D(28));
+        card.Controls.Add(box);
+        Hint(box, hint);
+        return box;
+    }
+
+    void BuildAlertsCard(int y)
+    {
+        AlertSetup a = app.S.Alerts;
+        Panel card = WidgetCard(y, 224);
+        CheckBox show = UI.Check(card, L.T("Show on stream"), 16, 17, a.Visible);
+        show.BackColor = UI.Card;
+        show.CheckedChanged += delegate { a.Visible = show.Checked; Changed(); };
+        UI.Lbl(card, L.T("seconds"), 226, 20, 90, 10f, UI.Muted, FontStyle.Regular);
+        NumericUpDown secs = UI.Number(card, 318, 16, 1, 60, a.Secs, 1);
+        secs.Size = new Size(UI.D(64), UI.D(30));
+        secs.ValueChanged += delegate { a.Secs = (int)secs.Value; Changed(); };
+        CheckBox tag = UI.Check(card, L.T("\"TikTok\" / \"Twitch\" above it"), 396, 17, a.Tag);
+        tag.BackColor = UI.Card;
+        tag.CheckedChanged += delegate { a.Tag = tag.Checked; Changed(); };
+
+        UI.Lbl(card, L.T("Show alerts for"), 16, 60, 400, 10f, UI.Text, FontStyle.Bold);
+        AlertCheck(card, L.T("Gifts"), 16, 92, a.Gifts, delegate (bool on) { a.Gifts = on; });
+        UI.Lbl(card, L.T("min. coins"), 130, 96, 90, 10f, UI.Muted, FontStyle.Regular);
+        NumericUpDown min = UI.Number(card, 222, 92, 0, 1000000, a.MinCoins, 10);
+        min.Size = new Size(UI.D(90), UI.D(30));
+        min.ValueChanged += delegate { a.MinCoins = (int)min.Value; Changed(); };
+        AlertCheck(card, L.T("Follows"), 340, 92, a.Follows, delegate (bool on) { a.Follows = on; });
+        AlertCheck(card, L.T("Shares"), 470, 92, a.Shares, delegate (bool on) { a.Shares = on; });
+        AlertCheck(card, L.T("Twitch subs"), 16, 130, a.Subs, delegate (bool on) { a.Subs = on; });
+        AlertCheck(card, L.T("Twitch bits"), 200, 130, a.Bits, delegate (bool on) { a.Bits = on; });
+        AlertCheck(card, L.T("Twitch raids"), 380, 130, a.Raids, delegate (bool on) { a.Raids = on; });
+
+        LinkButtons(card, 172, "alerts", "alerts");
+        Button test = UI.Btn(card, L.T("Test alert"), 342, 172, 160, 36, false);
+        test.Click += delegate
+        {
+            app.W.Alert(Brand.TikTok, AlertKind.Gifts, 0, L.F("{0} sent {1}", "ClutchKit", "Rose") + " x5", true);
+            app.W.Alert(Brand.Twitch, AlertKind.Bits, 0, L.F("{0} cheered {1} bits", "ClutchKit", 100), true);
+            WidgetMessage(L.T("Two test alerts sent to the alerts overlay (open it with Preview or in LIVE Studio / OBS)."), UI.Good);
+        };
+    }
+
+    void AlertCheck(Control card, string text, int x, int y, bool value, Action<bool> set)
+    {
+        CheckBox c = UI.Check(card, text, x, y + 4, value);
+        c.BackColor = UI.Card;
+        c.CheckedChanged += delegate { set(c.Checked); Changed(); };
+    }
+
     string TopText(TopSetup t)
     {
         List<Widgets.Fan> top = app.W.Top(t);
@@ -324,5 +451,7 @@ public partial class MainForm
         }
         if (topGiftersLbl != null && !topGiftersLbl.IsDisposed) topGiftersLbl.Text = TopText(app.S.TopGifters);
         if (topLikersLbl != null && !topLikersLbl.IsDisposed) topLikersLbl.Text = TopText(app.S.TopLikers);
+        foreach (KeyValuePair<ViewerCounter, Label> kv in viewerLabels)
+            if (!kv.Value.IsDisposed) kv.Value.Text = app.W.ViewerValue(kv.Key).ToString("N0");
     }
 }

@@ -1,9 +1,10 @@
-// ClutchKit - stream toolkit for TikTok LIVE Studio.
+// ClutchKit - stream toolkit for TikTok LIVE Studio, OBS Studio and Twitch.
 // ----------------------------------------------------------------------------------
 // Counters (as many as you like, each with its own hotkeys and its own look) shown in one overlay,
-// stream widgets (goal bars, subathon timer, top lists: Widgets.cs, WidgetsPage.cs), and actions: LIVE gifts, follows,
+// stream widgets (goal bars, subathon timer, top lists, viewer counts, joint TikTok + Twitch alerts: Widgets.cs, WidgetsPage.cs), and actions: LIVE gifts, follows,
 // shares, joins, likes and chat commands play sounds, press keys, change counters or control OBS (Actions.cs, TikTok.cs, ActionsPage.cs, Packs.cs, Obs.cs).
-// Menu: General > Counters > Widgets > Actions > TikTok LIVE > Overlay (how it gets on stream) > OBS (ObsPage.cs) > Settings (app options) > Debug (Debug.cs, DebugPage.cs).
+// Menu: General > Counters > Widgets > Actions > TikTok LIVE > Twitch (Twitch.cs, TwitchPage.cs) > Overlay > OBS (ObsPage.cs) > Settings > Debug (Debug.cs, DebugPage.cs).
+// Window: resizable with text that scales to fit (WindowSize.cs), smooth scrolling (Smooth.cs), service logos in the menu (Brand.cs).
 // Overlay modes:
 //   - Link overlay: a "data:" link pasted once into LIVE Studio (Add source > Link). It loads the
 //     overlay script from this app (http://127.0.0.1:<port>, this PC only), so every change made in
@@ -40,14 +41,14 @@ using Microsoft.Win32;
 [assembly: AssemblyProduct("ClutchKit")]
 [assembly: AssemblyCompany("ClutchKit")]
 [assembly: AssemblyCopyright("Copyright (c) 2026 ClutchKit")]
-[assembly: AssemblyVersion("3.4.0.0")]
-[assembly: AssemblyFileVersion("3.4.0.0")]
+[assembly: AssemblyVersion("3.5.0.0")]
+[assembly: AssemblyFileVersion("3.5.0.0")]
 [assembly: AssemblyInformationalVersion("3.3")]
 
 static class Program
 {
     public const string Name = "ClutchKit";
-    public const string Version = "3.4";
+    public const string Version = "3.5";
     // Shared with the older "Death Counter" builds so old and new never run (and count) at the same time.
     public static string MutexName = "Local\\DeathCounterTikTok";
 
@@ -495,6 +496,17 @@ public class Settings
     public List<Goal> Goals = new List<Goal>();
     public TimerSetup Timer = new TimerSetup();
     public TopSetup TopGifters = new TopSetup("gifters"), TopLikers = new TopSetup("likers");
+    public const int MaxViewers = 8;
+    public List<ViewerCounter> Viewers = new List<ViewerCounter>();
+    public AlertSetup Alerts = new AlertSetup();
+    // Twitch (chat, read without a login)
+    public string TwitchChannel = "";
+    public bool TwitchAuto = false;
+    // settings window
+    public int WindowW = 0, WindowH = 0;         // size at 100 % (0 = the normal size)
+    public bool WindowMax = false;
+    public bool SmoothScroll = true;             // the mouse wheel glides instead of jumping
+    public bool ScaleText = true;                // text and layout grow and shrink with the window
 
     public static string ToHex(Color c) { return "#" + c.R.ToString("x2") + c.G.ToString("x2") + c.B.ToString("x2"); }
     public static string CleanFont(string v) { return v.Trim().Replace("'", "").Replace("\"", ""); }
@@ -613,6 +625,15 @@ public class Settings
         s.Timer.Read(kv);
         s.TopGifters.Read(kv);
         s.TopLikers.Read(kv);
+        foreach (int id in IdList(kv, "viewers", MaxViewers)) s.Viewers.Add(ViewerCounter.Read(kv, id));
+        s.Alerts.Read(kv);
+        if (kv.TryGetValue("twitch.channel", out v)) s.TwitchChannel = TwitchChat.CleanChannel(v);
+        if (kv.TryGetValue("twitch.autoconnect", out v)) s.TwitchAuto = ParseBool(v, false);
+        if (kv.TryGetValue("ui.width", out v)) s.WindowW = ParseInt(v, 0, 0, 10000);
+        if (kv.TryGetValue("ui.height", out v)) s.WindowH = ParseInt(v, 0, 0, 10000);
+        if (kv.TryGetValue("ui.maximized", out v)) s.WindowMax = ParseBool(v, false);
+        if (kv.TryGetValue("ui.smoothscroll", out v)) s.SmoothScroll = ParseBool(v, true);
+        if (kv.TryGetValue("ui.scaletext", out v)) s.ScaleText = ParseBool(v, true);
 
         // the look from older versions (one look for everything) becomes every counter's starting look
         Style shared = new Style();
@@ -750,6 +771,18 @@ public class Settings
         Timer.Write(b);
         TopGifters.Write(b);
         TopLikers.Write(b);
+        List<string> viewerIds = new List<string>();
+        foreach (ViewerCounter vc in Viewers) viewerIds.Add(vc.Id.ToString());
+        b.AppendLine("viewers=" + string.Join(",", viewerIds.ToArray()));
+        foreach (ViewerCounter vc in Viewers) vc.Write(b);
+        Alerts.Write(b);
+        b.AppendLine("twitch.channel=" + TwitchChannel);
+        b.AppendLine("twitch.autoConnect=" + TwitchAuto);
+        b.AppendLine("ui.width=" + WindowW);
+        b.AppendLine("ui.height=" + WindowH);
+        b.AppendLine("ui.maximized=" + WindowMax);
+        b.AppendLine("ui.smoothScroll=" + SmoothScroll);
+        b.AppendLine("ui.scaleText=" + ScaleText);
         b.AppendLine("tiktok.user=" + TikTokUser);
         b.AppendLine("tiktok.apiKey=" + TikTokKey);
         b.AppendLine("tiktok.autoConnect=" + AutoConnect);
@@ -820,6 +853,7 @@ public class App : ApplicationContext
     public GiftEngine Engine;
     public TikTokLive TikTok;
     public ObsLink Obs;
+    public TwitchChat Twitch;
     public Widgets W;
     readonly List<string> log = new List<string>();
 
@@ -878,6 +912,8 @@ public class App : ApplicationContext
         W = new Widgets(this);
         TikTok = new TikTokLive(this);
         Obs = new ObsLink(this);
+        Twitch = new TwitchChat(this);
+        SmoothPanel.Smooth = S.SmoothScroll;
         BuildState();
 
         server = new OverlayServer(S.Port, this);
@@ -889,6 +925,7 @@ public class App : ApplicationContext
         if (!testMode) StartListeners();
         if (!testMode && S.AutoConnect && S.TikTokUser.Length > 0 && S.TikTokKey.Length > 0) TikTok.Start(S.TikTokUser, S.TikTokKey);
         if (!testMode && S.ObsAuto) Obs.Start(S.ObsHost, S.ObsPort, S.ObsPassword);
+        if (!testMode && S.TwitchAuto && S.TwitchChannel.Length > 0) Twitch.Start(S.TwitchChannel);
 
         if (S.Mode == "window") ShowCapture();
         if (!S.StartInTray) ShowMain();
@@ -1136,6 +1173,42 @@ public class App : ApplicationContext
     {
         S.Goals.Remove(g);
         ApplySettings();
+    }
+
+    // A new viewer count: the first shows TikTok, the second Twitch, then both added together.
+    public ViewerCounter AddViewer()
+    {
+        if (S.Viewers.Count >= Settings.MaxViewers) return null;
+        ViewerCounter v = new ViewerCounter();
+        foreach (ViewerCounter o in S.Viewers) v.Id = Math.Max(v.Id, o.Id);
+        v.Id++;
+        v.Source = ViewerCounter.Sources[Math.Min(S.Viewers.Count, ViewerCounter.Sources.Length - 1)];
+        v.Before = ViewerCounter.DefaultBefore(v.Source);
+        S.Viewers.Add(v);
+        ApplySettings();
+        return v;
+    }
+
+    public void RemoveViewer(ViewerCounter v)
+    {
+        S.Viewers.Remove(v);
+        ApplySettings();
+    }
+
+    // Builds the settings window again at the same place (new size, language or text scaling).
+    public void RebuildMain()
+    {
+        if (main == null || main.IsDisposed || !main.Visible) return;
+        MainForm old = main;
+        bool max = old.WindowState == FormWindowState.Maximized;
+        Point where = max ? old.RestoreBounds.Location : old.Location;
+        main = new MainForm(this);
+        main.StartPosition = FormStartPosition.Manual;
+        main.Location = where;
+        ShowMain();
+        old.AllowClose = true;
+        old.Close();
+        old.Dispose();
     }
 
     // The overlay state again (widgets call this, bundled, after events).
@@ -1538,6 +1611,7 @@ public class App : ApplicationContext
         if (hook != IntPtr.Zero) { UnhookWindowsHookEx(hook); hook = IntPtr.Zero; }
         TikTok.Stop();
         Obs.Stop();
+        Twitch.Stop();
         Engine.Clear();
         server.Stop();
         if (tray != null) { tray.Visible = false; tray.Dispose(); }
@@ -1554,7 +1628,7 @@ public class App : ApplicationContext
 public static class Overlay
 {
     // Bump this when Script() changes: open overlays notice and reload the new script by themselves.
-    public const string Version = "5.0";
+    public const string Version = "6.0";
 
     // Tiny page packed into a "data:" link so LIVE Studio can always load it (even when the app is
     // closed). It keeps trying to load the real overlay script from the app.
@@ -1603,9 +1677,12 @@ public static class Overlay
         if (!path.StartsWith("/obs/")) return null;
         string rest = path.Substring(5).TrimEnd('/');
         if (rest == "timer") return ViewHtml(port, "timer", "timer");
+        if (rest == "alerts") return ViewHtml(port, "alerts", "alerts");
+        if (rest == "viewers") return ViewHtml(port, "viewers", "viewers");
         if (rest == "top/gifters" || rest == "top/likers") return ViewHtml(port, rest.Replace('/', ':'), "top");
         int id;
         if (rest.StartsWith("goal/") && int.TryParse(rest.Substring(5), out id) && id > 0) return ViewHtml(port, "goal:" + id, "goal");
+        if (rest.StartsWith("viewers/") && int.TryParse(rest.Substring(8), out id) && id > 0) return ViewHtml(port, "viewers:" + id, "viewers");
         return null;
     }
 
@@ -1703,6 +1780,23 @@ st.textContent='html,body{margin:0;height:100%;overflow:hidden;background:transp
 document.head.appendChild(st);
 var w=document.createElement('div');w.id='dcv';document.body.appendChild(w);
 function el(c,p){var e=document.createElement('div');if(c)e.className=c;(p||w).appendChild(e);return e}
+if(K==='alerts'){var ap=el('p'),am=el(''),q=[],last=null,busy=false,lk='',ae=true;
+w.style.whiteSpace='normal';w.style.textAlign='center';w.style.opacity='0';w.style.transform='scale(.6)';w.style.visibility='visible';
+w.style.transition='opacity .35s,transform .45s cubic-bezier(.2,1.5,.4,1)';
+ap.style.fontSize='.42em';ap.style.fontWeight='900';ap.style.letterSpacing='.08em';am.style.maxWidth='11em';
+var alook=function(L){var k=JSON.stringify(L);if(k===lk)return;lk=k;var t=sh(L);w.style.fontFamily='\''+L.font+'\',\'Segoe UI\',sans-serif';
+w.style.fontWeight=L.bold?'900':'400';w.style.fontStyle=L.italic?'italic':'normal';w.style.color=L.color;am.style.textShadow=t;ap.style.textShadow=t};
+var anext=function(secs,tag){if(busy||!q.length)return;busy=true;var it=q.shift(),tw=it.p==='twitch';
+ap.textContent=tw?'Twitch':'TikTok';ap.style.color=tw?'#a970ff':'#fe2c55';ap.style.display=tag?'':'none';am.textContent=it.t;fit();
+w.style.opacity='1';w.style.transform='scale(1)';
+setTimeout(function(){w.style.opacity='0';w.style.transform='scale(.6)';setTimeout(function(){busy=false;anext(secs,tag)},500)},secs*1000)};
+var atick=function(){if(!ae)return;fetch(B+'/api/state',{cache:'no-store'}).then(function(r){return r.json()}).then(function(s){
+if(s.overlayVersion!==V){ae=false;if(window.dcReload)window.dcReload();return}
+var a=s.alerts||{},it=a.items||[],i;alook(s.look||{});
+if(last===null){last=0;for(i=0;i<it.length;i++)last=Math.max(last,it[i].id)}
+else for(i=0;i<it.length;i++)if(it[i].id>last){last=it[i].id;if(a.show)q.push(it[i])}
+if(q.length>10)q.splice(0,q.length-10);anext(a.secs||5,a.tag!==false);setTimeout(atick,300)}).catch(function(){setTimeout(atick,1000)})};
+addEventListener('resize',fit);atick();return}
 var ti=el('t'),n=el(K==='goal'?'n g':'n'),fill=null,rows=null,cur=null,lookKey='',alive=true;
 if(K==='goal')fill=el('fill',el('bar'));
 if(K==='top'){rows=el('rows');rows.k=null;n.style.display='none'}
@@ -1714,6 +1808,7 @@ function fmt(x){return Number(x).toLocaleString()}
 function clock(ms){var s=Math.max(0,Math.ceil(ms/1000)),h=Math.floor(s/3600),m=Math.floor(s%3600/60),x=s%60;
 return(h>0?h+':'+(m<10?'0':''):'')+m+':'+(x<10?'0':'')+x}
 function pick(s){if(K==='goal'){var g=s.goals||[];for(var i=0;i<g.length;i++)if(String(g[i].id)===A)return g[i];return null}
+if(K==='viewers'){var l=(s.viewers||{}).list||[],o=[];for(var i=0;i<l.length;i++)if(l[i].show&&(!A||String(l[i].id)===A))o.push(l[i].text);return{show:o.length>0,lines:o}}
 if(K==='timer')return s.timer;if(K==='top')return s.top?s.top[A]:null;return null}
 function left(){return !cur?0:cur.state==='run'?cur.ends-Date.now():cur.left}
 function put(e,t){if(e.textContent!==t){e.textContent=t;return true}return false}
@@ -1725,6 +1820,7 @@ ch=put(ti,d.title||'')||ch;ti.style.display=d.title?'':'none';
 if(K==='goal'){ch=put(n,fmt(d.value)+' / '+fmt(d.target))||ch;fill.style.background=d.color;
 fill.style.width=(d.target>0?Math.min(100,d.value*100/d.target):100)+'%'}
 else if(K==='timer'){cur=d;ch=put(n,clock(left()))||ch}
+else if(K==='viewers'){var j=d.lines.join('|');if(j!==n.k){n.k=j;n.innerHTML='';for(var i=0;i<d.lines.length;i++)el('',n).textContent=d.lines[i];ch=true}}
 else if(rows){var r=d.rows||[],j=JSON.stringify(r);if(j!==rows.k){rows.k=j;rows.innerHTML='';
 if(!r.length){var z=el('row',rows);z.textContent='-';z.style.justifyContent='center';z.style.opacity='.6'}
 for(var i=0;i<r.length;i++){var o=el('row',rows),a=document.createElement('span'),b=document.createElement('span');
@@ -2313,11 +2409,24 @@ public static class UI
 
     static float dpi = -1;
 
-    public static int D(int v)
+    // How much bigger the settings window draws everything (it grows and shrinks with the window,
+    // see WindowSize.cs). 1 = normal size.
+    public static float Zoom = 1f;
+
+    static float Dpi
     {
-        if (dpi < 0) using (Graphics g = Graphics.FromHwnd(IntPtr.Zero)) dpi = g.DpiX;
-        return (int)Math.Round(v * dpi / 96f);
+        get
+        {
+            if (dpi < 0) using (Graphics g = Graphics.FromHwnd(IntPtr.Zero)) dpi = g.DpiX;
+            return dpi;
+        }
     }
+
+    public static int D(int v) { return (int)Math.Round(v * Dpi / 96f * Zoom); }
+
+    // Screen pixels for a size at 100 % (ignores Zoom), and back.
+    public static int D0(int v) { return (int)Math.Round(v * Dpi / 96f); }
+    public static int Logical(int px) { return (int)Math.Round(px * 96f / Dpi); }
 
     // Fonts are shared: one per size and style, instead of a new font (a Windows GDI handle) for every
     // label and button - the Actions list alone makes hundreds of controls. Never dispose these.
@@ -2325,6 +2434,7 @@ public static class UI
 
     public static Font F(float pt, FontStyle st)
     {
+        pt *= Zoom;
         int key = (int)Math.Round(pt * 10) * 16 + (int)st;
         Font f;
         lock (fonts)
@@ -2597,11 +2707,9 @@ public partial class MainForm : Form
         Icon = app.AppIcon;
         BackColor = UI.Bg;
         ForeColor = UI.Text;
-        Font = UI.F(10f, FontStyle.Regular);
-        FormBorderStyle = FormBorderStyle.FixedSingle;
-        MaximizeBox = false;
         if (!probe) StartPosition = FormStartPosition.CenterScreen;
-        ClientSize = new Size(UI.D(900), UI.D(660));
+        SetUpWindowSize();   // WindowSize.cs: resizable, remembers its size, sets the text scale (UI.Zoom)
+        Font = UI.F(10f, FontStyle.Regular);
 
         content = new Panel();
         content.Dock = DockStyle.Fill;
@@ -2620,9 +2728,10 @@ public partial class MainForm : Form
         AddPage(L.T("Counters"), BuildCountersPage());
         AddPage(L.T("Widgets"), BuildWidgetsPage());
         AddPage(L.T("Actions"), BuildActionsPage());
-        AddPage(L.T("TikTok LIVE"), BuildTikTokPage());
+        AddPage(L.T("TikTok LIVE"), BuildTikTokPage(), Brand.TikTok);
+        AddPage(L.T("Twitch"), BuildTwitchPage(), Brand.Twitch);
         AddPage(L.T("Overlay"), BuildOverlayPage());
-        AddPage(L.T("OBS"), BuildObsPage());
+        AddPage(L.T("OBS"), BuildObsPage(), Brand.Obs);
         AddPage(L.T("Settings"), BuildSettingsPage());
         AddPage(L.T("Debug"), BuildDebugPage());
         loading = false;
@@ -2666,7 +2775,10 @@ public partial class MainForm : Form
 
     // ---------------- page plumbing (add a page here for new features) ----------------
 
-    void AddPage(string title, Panel page)
+    void AddPage(string title, Panel page) { AddPage(title, page, null); }
+
+    // icon: a logo next to the name (Brand.TikTok, ...); the other names get an empty space, so they line up
+    void AddPage(string title, Panel page, string icon)
     {
         int index = pages.Count;
         page.Dock = DockStyle.Fill;
@@ -2677,7 +2789,11 @@ public partial class MainForm : Form
         pages.Add(page);
 
         Button b = new Button();
-        b.Text = "   " + title;
+        b.Text = title;
+        b.Image = Brand.Icon(icon, UI.D(20));
+        b.ImageAlign = ContentAlignment.MiddleLeft;
+        b.TextImageRelation = TextImageRelation.ImageBeforeText;
+        b.Padding = new Padding(UI.D(10), 0, 0, 0);
         b.TextAlign = ContentAlignment.MiddleLeft;
         b.FlatStyle = FlatStyle.Flat;
         b.FlatAppearance.BorderSize = 0;
@@ -2712,7 +2828,7 @@ public partial class MainForm : Form
 
     Panel NewPage(string title, string subtitle)
     {
-        Panel p = new Panel();
+        Panel p = new SmoothPanel();
         UI.Lbl(p, title, 36, 24, 600, 18f, UI.Text, FontStyle.Bold);
         UI.Para(p, subtitle, 38, 76, 620, 40);
         return p;
@@ -3036,6 +3152,23 @@ public partial class MainForm : Form
         }
         UI.Para(p, "ClutchKit " + Program.Version + "   \u00b7   " + L.F("Overlay port: {0}", app.S.Port) +
                    (app.ServerError != null ? "  " + L.T("(in use by another program - the overlay can't connect)") : ""), 38, 348, 620, 24);
+
+        UI.Lbl(p, L.T("This window"), 38, 396, 620, 11f, UI.Text, FontStyle.Bold);
+        CheckBox smooth = UI.Check(p, L.T("Smooth scrolling"), 38, 428, app.S.SmoothScroll);
+        smooth.CheckedChanged += delegate
+        {
+            app.S.SmoothScroll = SmoothPanel.Smooth = smooth.Checked;
+            Changed();
+        };
+        CheckBox scale = UI.Check(p, L.T("Scale text with the window size"), 38, 462, app.S.ScaleText);
+        scale.CheckedChanged += delegate
+        {
+            app.S.ScaleText = scale.Checked;
+            Changed();
+            BeginInvoke((MethodInvoker)delegate { if (!IsDisposed) app.RebuildMain(); });   // not from inside the box's own event
+        };
+        UI.Para(p, L.T("Drag the window's edge or maximize it: text and buttons grow or shrink to fit. Off: they stay the normal size."),
+                60, 494, 600, 44);
         return p;
     }
 
@@ -3064,6 +3197,7 @@ public partial class MainForm : Form
         app.W.Changed -= OnWidgetsChanged;
         app.Obs.StatusChanged -= OnObsStatus;
         app.Obs.ListsChanged -= OnObsStatus;
+        app.Twitch.StatusChanged -= OnTwitchStatus;
         UnhookActionPages();
         if (debugTimer != null) debugTimer.Dispose();
         base.OnFormClosed(e);

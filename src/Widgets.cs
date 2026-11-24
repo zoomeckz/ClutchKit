@@ -141,6 +141,104 @@ public class TopSetup
     }
 }
 
+// A viewer count on stream: "Twitch: 23", "TikTok: 44" or both added together.
+public class ViewerCounter
+{
+    public const string FromTikTok = "tiktok", FromTwitch = "twitch", FromBoth = "total";
+    public static readonly string[] Sources = { FromTikTok, FromTwitch, FromBoth };
+    public static readonly string[] SourceNames = { L.N("TikTok"), L.N("Twitch"), L.N("TikTok + Twitch") };
+
+    public int Id;
+    public string Before = "TikTok:", After = "";   // text around the number
+    public string Source = FromTikTok;
+    public bool Visible = true;
+
+    public static string DefaultBefore(string source)
+    {
+        return source == FromTwitch ? "Twitch:" : source == FromBoth ? L.T("Viewers:") : "TikTok:";
+    }
+
+    public static ViewerCounter Read(Dictionary<string, string> kv, int id)
+    {
+        ViewerCounter c = new ViewerCounter();
+        c.Id = id;
+        string pre = "viewers." + id + ".", v;
+        if (kv.TryGetValue(pre + "source", out v) && Array.IndexOf(Sources, v.Trim()) >= 0) c.Source = v.Trim();
+        c.Before = DefaultBefore(c.Source);
+        if (kv.TryGetValue(pre + "before", out v)) c.Before = v.Trim();
+        if (kv.TryGetValue(pre + "after", out v)) c.After = v.Trim();
+        if (kv.TryGetValue(pre + "show", out v)) c.Visible = Settings.ParseBool(v, true);
+        return c;
+    }
+
+    public void Write(StringBuilder b)
+    {
+        string pre = "viewers." + Id + ".";
+        b.AppendLine(pre + "source=" + Source);
+        b.AppendLine(pre + "before=" + Before.Replace("\r", "").Replace("\n", " "));
+        b.AppendLine(pre + "after=" + After.Replace("\r", "").Replace("\n", " "));
+        b.AppendLine(pre + "show=" + Visible);
+    }
+}
+
+// What the joint alerts overlay shows (TikTok and Twitch together).
+public static class AlertKind
+{
+    public const string Gifts = "gift", Follows = "follow", Shares = "share", Subs = "sub", Bits = "bits", Raids = "raid";
+}
+
+public class AlertSetup
+{
+    public bool Visible = true;
+    public int Secs = 5;               // how long each alert stays
+    public bool Tag = true;            // "TikTok" / "Twitch" above the text
+    public bool Gifts = true, Follows = true, Shares = false, Subs = true, Bits = true, Raids = true;
+    public int MinCoins = 0;           // gifts: only from this many coins (the whole combo)
+
+    public bool Wants(string kind, long amount)
+    {
+        switch (kind)
+        {
+            case AlertKind.Gifts: return Gifts && amount >= MinCoins;
+            case AlertKind.Follows: return Follows;
+            case AlertKind.Shares: return Shares;
+            case AlertKind.Subs: return Subs;
+            case AlertKind.Bits: return Bits;
+            case AlertKind.Raids: return Raids;
+        }
+        return false;
+    }
+
+    public void Read(Dictionary<string, string> kv)
+    {
+        string v;
+        if (kv.TryGetValue("alerts.show", out v)) Visible = Settings.ParseBool(v, true);
+        if (kv.TryGetValue("alerts.secs", out v)) Secs = Settings.ParseInt(v, Secs, 1, 60);
+        if (kv.TryGetValue("alerts.tag", out v)) Tag = Settings.ParseBool(v, true);
+        if (kv.TryGetValue("alerts.gifts", out v)) Gifts = Settings.ParseBool(v, true);
+        if (kv.TryGetValue("alerts.mincoins", out v)) MinCoins = Settings.ParseInt(v, 0, 0, 1000000);
+        if (kv.TryGetValue("alerts.follows", out v)) Follows = Settings.ParseBool(v, true);
+        if (kv.TryGetValue("alerts.shares", out v)) Shares = Settings.ParseBool(v, false);
+        if (kv.TryGetValue("alerts.subs", out v)) Subs = Settings.ParseBool(v, true);
+        if (kv.TryGetValue("alerts.bits", out v)) Bits = Settings.ParseBool(v, true);
+        if (kv.TryGetValue("alerts.raids", out v)) Raids = Settings.ParseBool(v, true);
+    }
+
+    public void Write(StringBuilder b)
+    {
+        b.AppendLine("alerts.show=" + Visible);
+        b.AppendLine("alerts.secs=" + Secs);
+        b.AppendLine("alerts.tag=" + Tag);
+        b.AppendLine("alerts.gifts=" + Gifts);
+        b.AppendLine("alerts.minCoins=" + MinCoins);
+        b.AppendLine("alerts.follows=" + Follows);
+        b.AppendLine("alerts.shares=" + Shares);
+        b.AppendLine("alerts.subs=" + Subs);
+        b.AppendLine("alerts.bits=" + Bits);
+        b.AppendLine("alerts.raids=" + Raids);
+    }
+}
+
 // The live side of the widgets: counting, the running timer, the top lists, saving them.
 public class Widgets
 {
@@ -170,6 +268,7 @@ public class Widgets
         liveFile = Path.Combine(app.Folder, "live.txt");
         boardFile = Path.Combine(app.Folder, "leaderboard.txt");
         leftMs = StartMs;
+        TikTokViewers = TwitchViewers = -1;
         Load();
         second.Interval = 1000;
         second.Tick += delegate { OnSecond(); };
@@ -511,6 +610,76 @@ public class Widgets
         b.Append(',');
         AppendTop(b, s.TopLikers);
         b.Append('}');
+
+        b.Append(",\"viewers\":{\"tiktok\":").Append(TikTokViewers).Append(",\"twitch\":").Append(TwitchViewers).Append(",\"list\":[");
+        for (int i = 0; i < s.Viewers.Count; i++)
+        {
+            ViewerCounter v = s.Viewers[i];
+            if (i > 0) b.Append(',');
+            b.Append("{\"id\":").Append(v.Id).Append(",\"show\":").Append(v.Visible ? "true" : "false")
+             .Append(",\"text\":").Append(App.Js(ViewerText(v))).Append('}');
+        }
+        b.Append("]}");
+
+        AlertSetup a = s.Alerts;
+        b.Append(",\"alerts\":{\"show\":").Append(a.Visible ? "true" : "false").Append(",\"secs\":").Append(a.Secs)
+         .Append(",\"tag\":").Append(a.Tag ? "true" : "false").Append(",\"items\":[");
+        for (int i = 0; i < alerts.Count; i++)
+        {
+            if (i > 0) b.Append(',');
+            b.Append("{\"id\":").Append(alerts[i].Id).Append(",\"p\":").Append(App.Js(alerts[i].Platform))
+             .Append(",\"t\":").Append(App.Js(alerts[i].Text)).Append('}');
+        }
+        b.Append("]}");
+    }
+
+    // ---------------- viewer counts ----------------
+
+    // -1 = not known (not connected)
+    public int TikTokViewers { get; private set; }
+    public int TwitchViewers { get; private set; }
+
+    public void SetViewers(string platform, int n)
+    {
+        if (platform == Brand.Twitch) { if (TwitchViewers == n) return; TwitchViewers = n; }
+        else { if (TikTokViewers == n) return; TikTokViewers = n; }
+        MarkChanged(false, false);
+    }
+
+    public long ViewerValue(ViewerCounter v)
+    {
+        long tt = Math.Max(0, TikTokViewers), tw = Math.Max(0, TwitchViewers);
+        return v.Source == ViewerCounter.FromTwitch ? tw : v.Source == ViewerCounter.FromBoth ? tt + tw : tt;
+    }
+
+    // "Twitch: 23"
+    public string ViewerText(ViewerCounter v)
+    {
+        List<string> parts = new List<string>();
+        if (v.Before.Length > 0) parts.Add(v.Before);
+        parts.Add(ViewerValue(v).ToString("N0"));
+        if (v.After.Length > 0) parts.Add(v.After);
+        return string.Join(" ", parts.ToArray());
+    }
+
+    // ---------------- joint alerts (TikTok + Twitch) ----------------
+
+    class AlertItem { public long Id; public string Platform = "", Text = ""; }
+    readonly List<AlertItem> alerts = new List<AlertItem>();
+    long alertId = DateTime.UtcNow.Ticks / 10000;   // keeps growing across restarts, so open overlays never miss one
+
+    // Shows an alert on the alerts overlay. force = always (the Test button), else only the kinds that are on.
+    public void Alert(string platform, string kind, long amount, string text, bool force)
+    {
+        if (!force && !app.S.Alerts.Wants(kind, amount)) return;
+        AlertItem it = new AlertItem();
+        it.Id = ++alertId;
+        it.Platform = platform;
+        it.Text = text.Length > 120 ? text.Substring(0, 119) + "…" : text;
+        alerts.Add(it);
+        if (alerts.Count > 20) alerts.RemoveAt(0);
+        Diag.Count("alerts.shown");
+        MarkChanged(false, false);
     }
 
     void AppendTop(StringBuilder b, TopSetup t)

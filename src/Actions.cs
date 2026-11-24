@@ -32,8 +32,19 @@ public class LiveEvent
     public bool RepeatEnd = true;
     public bool Streakable;      // combo gift: TikTok sends updates while the combo runs, then a last one
     public bool Test;
+    public string Platform = Brand.TikTok;   // where it happened: TikTok, or Twitch (chat only)
 
-    public string Who { get { return User.Length > 0 ? "@" + User : (Nick.Length > 0 ? Nick : L.T("someone")); } }
+    public string Who
+    {
+        get
+        {
+            if (Platform == Brand.Twitch) return (Nick.Length > 0 ? Nick : User) + " (Twitch)";
+            return User.Length > 0 ? "@" + User : (Nick.Length > 0 ? Nick : L.T("someone"));
+        }
+    }
+
+    // The name viewers know (for alerts on stream): the nickname, else the username.
+    public string Display { get { return Nick.Length > 0 ? Nick : User.Length > 0 ? User : L.T("someone"); } }
 
     // One viewer, the same across messages (for per-viewer cooldowns and the top lists).
     public string ViewerKey { get { return UserId.Length > 0 ? UserId : User.ToLowerInvariant(); } }
@@ -708,6 +719,12 @@ public class GiftEngine
     {
         bool first;
         int added = NewGifts(g, out first);
+        if (!g.Streakable || g.RepeatEnd)   // alerts: once per send, when the combo is over
+        {
+            int n = Math.Max(1, g.RepeatCount);
+            app.W.Alert(Brand.TikTok, AlertKind.Gifts, (long)Math.Max(0, g.Coins) * n,
+                        L.F("{0} sent {1}", g.Display, g.GiftName.Length > 0 ? g.GiftName : L.T("a gift")) + (n > 1 ? " x" + n : ""), false);
+        }
         if (added == 0 && !first) return;   // the closing message of a combo we already counted
         app.W.Count(g, added);              // goals, timer and top lists count even while actions are paused
 
@@ -725,6 +742,8 @@ public class GiftEngine
     void OnSimple(LiveEvent e)
     {
         app.W.Count(e, 1);
+        if (e.Type == LiveEvent.Follow) app.W.Alert(Brand.TikTok, AlertKind.Follows, 1, L.F("{0} followed", e.Display), false);
+        else if (e.Type == LiveEvent.Share) app.W.Alert(Brand.TikTok, AlertKind.Shares, 1, L.F("{0} shared the LIVE", e.Display), false);
         string what = (e.Type == LiveEvent.Follow ? L.F("{0} followed you", e.Who) : e.Type == LiveEvent.Share ? L.F("{0} shared your LIVE", e.Who) : L.F("{0} joined", e.Who)) +
                       (e.Test ? " [" + L.T("test") + "]" : "");
         if (!app.S.ActionsOn) { if (e.Type != LiveEvent.Join) app.Log(what + " - " + L.T("actions are paused")); return; }

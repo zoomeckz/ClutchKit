@@ -35,3 +35,9 @@ automatically"), ClutchKit connects to the OBS WebSocket server at the address t
 same computer, `127.0.0.1`) and sends it only the commands of the user's own actions (switch scene, show or hide a
 source, save the replay buffer, start or stop recording, mute). The OBS password is stored in `settings.ini` on
 the user's computer and is not sent anywhere else.
+
+The optional Twitch connection: when the user presses **Connect** on the Twitch page (or turns on "Connect
+automatically"), ClutchKit reads the public chat of the channel the user entered from Twitch's chat server
+(`wss://irc-ws.chat.twitch.tv`) as an anonymous viewer, without a login, and never writes in it. Once a minute it
+asks decapi.me (`https://decapi.me/twitch/viewercount/<channel>`) for the channel's viewer count; only the channel
+name is sent.

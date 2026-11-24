@@ -1,9 +1,9 @@
 # ClutchKit
 
-Stream toolkit for **TikTok LIVE Studio** on Windows: on-stream **counters** (deaths, wins, kills, attempts, ...)
+Stream toolkit for **TikTok LIVE Studio** and **OBS Studio** on Windows: on-stream **counters** (deaths, wins, kills, attempts, ...)
 that you change with hotkeys while you play, **stream widgets** (goal bars, a subathon timer, top gifters), and
-**actions**: gifts, follows, shares, joins, likes and chat commands play sound alerts, press keys in your game or
-change your counters.
+**actions**: gifts, follows, shares, joins, likes and chat commands play sound alerts, press keys in your game,
+change your counters or control OBS.
 
 **Counters**
 - As many counters as you need (up to 8), each with its own hotkeys and its own look
@@ -25,6 +25,8 @@ change your counters.
 - Triggers: a gift (by name, or any gift worth at least N coins), a follow, a share, a viewer joining,
   every N likes, or a chat command such as `!boom` (with a cooldown per viewer; ClutchKit never writes in chat)
 - Change a counter: add, subtract, set, or add the gift's coins (e.g. every Rose = +1 death)
+- Control OBS: switch scene, show or hide a source, mute or unmute (each optionally for N seconds, then back),
+  save the replay buffer, start or stop recording
 - Sound alerts with no limits: MP3/WAV played by ClutchKit itself (not through the overlay), with volume,
   one after another so they never talk over each other
 - Press a key in your game, or type text such as a Minecraft command
@@ -41,6 +43,12 @@ change your counters.
   start switched off, so you can check them first)
 - LIVE events are read through [Euler Stream](https://www.eulerstream.com) (free account and API key), because
   TikTok has no official API for LIVE events
+
+**OBS Studio**
+- Counters and every widget as OBS Browser sources: a plain `http://127.0.0.1:<port>/obs/...` link per overlay
+- Actions control OBS through its built-in WebSocket server (OBS 28 or newer, protocol v5); scenes and sources
+  are listed in the action once connected
+- Connects automatically if you want, and waits while OBS is closed
 
 **Languages**
 - English, Español, Português (Brasil), Bahasa Indonesia, Türkçe, Deutsch, Français and Tiếng Việt
@@ -67,6 +75,8 @@ The full guide is in [docs/How to install ClutchKit.txt](docs/How%20to%20install
 In ClutchKit open **Overlay** > **Copy LIVE Studio link**, then in LIVE Studio: **Add source** > **Link** > paste.
 You only do this once; changes you make in ClutchKit show up on stream automatically.
 
+Using OBS instead? Open **OBS** > **Copy OBS link**, then in OBS: **Sources** > **+** > **Browser** > paste it into **URL**.
+
 ## Build from source
 
 Requires only Windows:
@@ -88,7 +98,8 @@ Free code signing provided by [SignPath.io](https://about.signpath.io), certific
 This program will not transfer any information to other networked systems unless specifically requested by the
 user or the person installing or operating it. The overlay only talks to ClutchKit on your own PC. The only internet
 connection is the TikTok LIVE connection, and only after you press Connect: your TikTok username and Euler Stream
-API key go to Euler Stream. See the [Code signing policy](CODE_SIGNING_POLICY.md) for details.
+API key go to Euler Stream. The optional OBS connection only goes to the OBS address you enter (normally this PC).
+See the [Code signing policy](CODE_SIGNING_POLICY.md) for details.
 
 ## License
 

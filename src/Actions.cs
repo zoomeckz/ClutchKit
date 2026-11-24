@@ -115,14 +115,19 @@ public class RuleGroup
 // One rule: when <trigger> happens, do <kind> (press a key / type text / play a sound / change a counter).
 public class GiftRule
 {
-    public const string KindKey = "key", KindText = "text", KindSound = "sound", KindCounter = "counter";
-    public static readonly string[] Kinds = { KindKey, KindText, KindSound, KindCounter };
-    public static readonly string[] KindNames = { L.N("Press a key"), L.N("Type text"), L.N("Play a sound"), L.N("Change a counter") };
+    public const string KindKey = "key", KindText = "text", KindSound = "sound", KindCounter = "counter", KindObs = "obs";
+    public static readonly string[] Kinds = { KindKey, KindText, KindSound, KindCounter, KindObs };
+    public static readonly string[] KindNames = { L.N("Press a key"), L.N("Type text"), L.N("Play a sound"), L.N("Change a counter"), L.N("Control OBS") };
     public static readonly string[] Triggers = { LiveEvent.Gift, LiveEvent.Follow, LiveEvent.Share, LiveEvent.Join, LiveEvent.Likes, LiveEvent.Chat };
     public static readonly string[] TriggerNames = { L.N("Gift"), L.N("Follow"), L.N("Share"), L.N("Viewer joins"), L.N("Likes"), L.N("Chat command") };
     public const string OpAdd = "add", OpSubtract = "sub", OpSet = "set", OpCoins = "coins";
     public static readonly string[] Ops = { OpAdd, OpSubtract, OpSet, OpCoins };
     public static readonly string[] OpNames = { L.N("add"), L.N("subtract"), L.N("set to"), L.N("add the coins") };
+    public const string ObsScene = "scene", ObsShow = "show", ObsHide = "hide", ObsReplay = "replay",
+                        ObsRecStart = "recstart", ObsRecStop = "recstop", ObsMute = "mute", ObsUnmute = "unmute";
+    public static readonly string[] ObsDos = { ObsScene, ObsShow, ObsHide, ObsReplay, ObsRecStart, ObsRecStop, ObsMute, ObsUnmute };
+    public static readonly string[] ObsDoNames = { L.N("switch scene"), L.N("show source"), L.N("hide source"), L.N("save replay"),
+                                                   L.N("start recording"), L.N("stop recording"), L.N("mute"), L.N("unmute") };
 
     // The name of a counter by id (set by the app; "change a counter" texts show it).
     public static Func<int, string> CounterName = delegate (int id) { return "#" + id; };
@@ -150,6 +155,15 @@ public class GiftRule
     public int CounterId = 0;          // change a counter: which one
     public string Op = OpAdd;          // change a counter: add / subtract / set to / add the gift's coins
     public int Amount = 1;
+    public string ObsDo = ObsScene;    // control OBS: what to do
+    public string ObsTarget = "";      // the scene / source / audio source
+    public string ObsInScene = "";     // show/hide: the scene the source is in ("" = the scene on stream)
+    public int ObsSecs = 0;            // undo it after this many seconds (0 = stays)
+
+    // these need a scene or source name
+    public bool ObsNeedsTarget { get { return ObsDo == ObsScene || ObsDo == ObsShow || ObsDo == ObsHide || ObsDo == ObsMute || ObsDo == ObsUnmute; } }
+    // these can be undone after a while
+    public bool ObsTimed { get { return ObsNeedsTarget; } }
 
     public GiftRule Clone() { return (GiftRule)MemberwiseClone(); }
 
@@ -210,12 +224,13 @@ public class GiftRule
             if (Kind == KindText) return Text.Length > 0;
             if (Kind == KindSound) return SoundFile.Length > 0;
             if (Kind == KindCounter) return CounterId > 0;
+            if (Kind == KindObs) return !ObsNeedsTarget || ObsTarget.Trim().Length > 0;
             return Key.IsSet;
         }
     }
 
-    // A sound or key action waits in a queue; changing a counter happens right away.
-    public bool Instant { get { return Kind == KindCounter; } }
+    // A sound or key action waits in a queue; changing a counter or controlling OBS happens right away.
+    public bool Instant { get { return Kind == KindCounter || Kind == KindObs; } }
 
     // What triggers it, in the user's language ("Rose (100+ coins)", "Follow", "Every 1000 likes").
     public string TriggerText
@@ -248,6 +263,22 @@ public class GiftRule
                 if (Op == OpSet) return L.F("set {0} to {1}", name, Amount);
                 if (Op == OpCoins) return L.F("{0} + the gift's coins", name) + times;
                 return name + (Op == OpSubtract ? " -" : " +") + Amount + times;
+            }
+            if (Kind == KindObs)
+            {
+                string t = ObsTarget.Trim().Length > 0 ? ObsTarget.Trim() : L.T("(nothing picked)");
+                string forSecs = ObsTimed && ObsSecs > 0 ? " " + L.F("for {0} s", ObsSecs) : "";
+                switch (ObsDo)
+                {
+                    case ObsShow: return L.F("OBS: show {0}", t) + forSecs;
+                    case ObsHide: return L.F("OBS: hide {0}", t) + forSecs;
+                    case ObsMute: return L.F("OBS: mute {0}", t) + forSecs;
+                    case ObsUnmute: return L.F("OBS: unmute {0}", t) + forSecs;
+                    case ObsReplay: return L.T("OBS: save replay");
+                    case ObsRecStart: return L.T("OBS: start recording");
+                    case ObsRecStop: return L.T("OBS: stop recording");
+                }
+                return L.F("OBS: scene {0}", t) + forSecs;
             }
             if (Kind == KindSound) return L.F("play {0}", SoundFile.Length > 0 ? Path.GetFileName(SoundFile) : L.T("(no sound picked)")) + times;
             if (Kind == KindText)
@@ -287,6 +318,10 @@ public class GiftRule
         if (kv.TryGetValue(pre + "counter", out v)) r.CounterId = Settings.ParseInt(v, 0, 0, int.MaxValue);
         if (kv.TryGetValue(pre + "op", out v) && Array.IndexOf(Ops, v.Trim()) >= 0) r.Op = v.Trim();
         if (kv.TryGetValue(pre + "amount", out v)) r.Amount = Settings.ParseInt(v, 1, 0, 1000000);
+        if (kv.TryGetValue(pre + "obsdo", out v) && Array.IndexOf(ObsDos, v.Trim()) >= 0) r.ObsDo = v.Trim();
+        if (kv.TryGetValue(pre + "obstarget", out v)) r.ObsTarget = v.Trim();
+        if (kv.TryGetValue(pre + "obsscene", out v)) r.ObsInScene = v.Trim();
+        if (kv.TryGetValue(pre + "obssecs", out v)) r.ObsSecs = Settings.ParseInt(v, 0, 0, 3600);
         return r;
     }
 
@@ -315,6 +350,10 @@ public class GiftRule
         b.AppendLine(pre + "counter=" + CounterId);
         b.AppendLine(pre + "op=" + Op);
         b.AppendLine(pre + "amount=" + Amount);
+        b.AppendLine(pre + "obsDo=" + ObsDo);
+        b.AppendLine(pre + "obsTarget=" + ObsTarget.Replace("\r", "").Replace("\n", " "));
+        b.AppendLine(pre + "obsScene=" + ObsInScene.Replace("\r", "").Replace("\n", " "));
+        b.AppendLine(pre + "obsSecs=" + ObsSecs);
     }
 }
 
@@ -678,7 +717,7 @@ public class GiftEngine
         string result = RunRules(g, delegate (GiftRule r)
         {
             if (r.Kind == GiftRule.KindCounter && r.Op == GiftRule.OpCoins) return added;   // the coins of every gift in the combo
-            return r.PerGift && r.Kind != GiftRule.KindSound ? added : (first ? 1 : 0);
+            return r.PerGift && r.Kind != GiftRule.KindSound && r.Kind != GiftRule.KindObs ? added : (first ? 1 : 0);   // sounds and OBS: once per send
         });
         app.Log(what + " - " + (result ?? L.T("no action for it")));
     }
@@ -721,7 +760,7 @@ public class GiftEngine
     // Queues every matching rule runsFor(rule) times (cooldowns applied). Returns a log text, or null if nothing ran.
     string RunRules(LiveEvent e, Func<GiftRule, int> runsFor)
     {
-        int queued = 0, dropped = 0, cooling = 0, changed = 0;
+        int queued = 0, dropped = 0, cooling = 0, changed = 0, obs = 0;
         DateTime now = DateTime.UtcNow;
         foreach (GiftRule r in app.S.Rules)
         {
@@ -741,7 +780,8 @@ public class GiftEngine
                 if (viewerRun.TryGetValue(viewer, out last) && (now - last).TotalSeconds < r.UserCooldownSec) { cooling++; continue; }
             }
             int ran = 0;
-            if (r.Instant) { if (RunCounter(r, e, runs)) { ran = 1; changed++; } }
+            if (r.Kind == GiftRule.KindObs) { app.Obs.Run(r, Source(new Job { Rule = r, Event = e })); ran = 1; obs++; }
+            else if (r.Instant) { if (RunCounter(r, e, runs)) { ran = 1; changed++; } }
             else
                 for (int i = 0; i < runs; i++)
                 {
@@ -757,10 +797,11 @@ public class GiftEngine
         if (queued > 0) Diag.Count("actions.queued", queued);
         if (dropped > 0) Diag.Count("actions.dropped", dropped);
         if (cooling > 0) Diag.Count("actions.cooling", cooling);
-        if (queued == 0 && dropped == 0 && changed == 0)
+        if (queued == 0 && dropped == 0 && changed == 0 && obs == 0)
             return cooling > 0 && e.Type != LiveEvent.Join ? L.T("waiting for cooldown") : null;
         List<string> parts = new List<string>();
         if (changed > 0) parts.Add(changed == 1 ? L.T("1 counter changed") : L.F("{0} counters changed", changed));
+        if (obs > 0) parts.Add(obs == 1 ? L.T("1 OBS action") : L.F("{0} OBS actions", obs));
         if (queued > 0) parts.Add(queued == 1 ? L.T("1 action queued") : L.F("{0} actions queued", queued));
         if (dropped > 0) parts.Add(L.F("{0} skipped (queue full)", dropped));
         return string.Join(", ", parts.ToArray());
@@ -810,6 +851,7 @@ public class GiftEngine
         e.Test = true;
         e.Type = r.Trigger;
         e.GiftName = r.Trigger == LiveEvent.Gift ? (r.AnyGift ? L.T("test gift") : r.Gifts.Split(',')[0].Trim()) : "";
+        if (r.Kind == GiftRule.KindObs) { app.Obs.Run(r, Source(new Job { Rule = r, Event = e })); return; }
         if (r.Instant)
         {
             if (RunCounter(r, e, 1)) app.Log(L.F("Did: {0}", r.ActionText) + " (" + Source(new Job { Rule = r, Event = e }) + ")");

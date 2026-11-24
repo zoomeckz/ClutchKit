@@ -423,8 +423,14 @@ public partial class MainForm
             {
                 ActionsMessage(r.Trigger == LiveEvent.Chat && r.Command.Trim().Length == 0 ? L.T("Type the command first (e.g. !boom).") :
                                r.Kind == GiftRule.KindText ? L.T("Type the text first.") : r.Kind == GiftRule.KindSound ? L.T("Pick a sound first.") :
-                               r.Kind == GiftRule.KindCounter ? L.T("Pick a counter first.") : L.T("Pick a key first."), UI.Warn);
+                               r.Kind == GiftRule.KindCounter ? L.T("Pick a counter first.") :
+                               r.Kind == GiftRule.KindObs ? L.T("Pick a scene or source first.") : L.T("Pick a key first."), UI.Warn);
                 if (r.Collapsed) { r.Collapsed = false; RebuildLater(); }
+                return;
+            }
+            if (r.Kind == GiftRule.KindObs && !app.Obs.Connected)
+            {
+                ActionsMessage(L.T("OBS isn't connected. Connect it on the OBS page first."), UI.Warn);
                 return;
             }
             if (r.Kind == GiftRule.KindSound || r.Instant) { app.Engine.RunTest(r); return; }
@@ -506,10 +512,30 @@ public partial class MainForm
             refresh();
             Changed();
         };
+        ComboBox obsDo = UI.Combo(card, 166, y1, 150);   // control OBS: what, which scene/source, for how long
+        obsDo.Items.AddRange(L.All(GiftRule.ObsDoNames));
+        obsDo.SelectedIndex = Math.Max(0, Array.IndexOf(GiftRule.ObsDos, r.ObsDo));
+        ComboBox obsTarget = UI.Combo(card, 324, y1, 150);
+        obsTarget.DropDownStyle = ComboBoxStyle.DropDown;
+        obsTarget.Text = r.ObsTarget;
+        bool fillingObs = false;
+        obsTarget.TextChanged += delegate { if (fillingObs) return; r.ObsTarget = obsTarget.Text.Trim(); refresh(); Changed(); };
+        obsTarget.DropDown += delegate
+        {
+            // the names OBS has right now (typing works too, e.g. while OBS is closed)
+            string[] names = r.ObsDo == GiftRule.ObsScene ? app.Obs.Scenes :
+                             r.ObsDo == GiftRule.ObsMute || r.ObsDo == GiftRule.ObsUnmute ? (app.Obs.Audio.Length > 0 ? app.Obs.Audio : app.Obs.Sources) :
+                             Concat(app.Obs.Sources, app.Obs.Scenes);
+            FillKeepText(obsTarget, names, ref fillingObs);
+        };
+        Label obsSecsLbl = UI.Lbl(card, L.T("for (s)"), 480, y1 + 4, 64, 10f, UI.Muted, FontStyle.Regular);
+        NumericUpDown obsSecs = UI.Number(card, 546, y1, 0, 3600, r.ObsSecs, 1);
+        obsSecs.Size = new Size(UI.D(60), UI.D(30));
+        obsSecs.ValueChanged += delegate { r.ObsSecs = (int)obsSecs.Value; refresh(); Changed(); };
 
         // row 3: how often
         int y2 = y1 + 46;
-        UI.Lbl(card, L.T("Times"), 16, y2 + 4, 56, 10f, UI.Muted, FontStyle.Regular);
+        Label timesLbl = UI.Lbl(card, L.T("Times"), 16, y2 + 4, 56, 10f, UI.Muted, FontStyle.Regular);
         NumericUpDown times = UI.Number(card, 72, y2, 1, 100, r.Times, 1);
         times.Size = new Size(UI.D(56), UI.D(30));
         times.ValueChanged += delegate { r.Times = (int)times.Value; refresh(); Changed(); };
@@ -520,6 +546,19 @@ public partial class MainForm
         CheckBox perGift = UI.Check(card, L.T("Every gift in a combo"), 306, y2 + 4, r.PerGift);
         perGift.BackColor = UI.Card;
         perGift.CheckedChanged += delegate { r.PerGift = perGift.Checked; Changed(); };
+        Label inSceneLbl = UI.Lbl(card, L.T("in scene"), 306, y2 + 4, 80, 10f, UI.Muted, FontStyle.Regular);   // show/hide: where the source is
+        ComboBox inScene = UI.Combo(card, 388, y2, 218);
+        inScene.DropDownStyle = ComboBoxStyle.DropDown;
+        string onStream = L.T("(the scene on stream)");
+        inScene.Text = r.ObsInScene.Length > 0 ? r.ObsInScene : onStream;
+        inScene.TextChanged += delegate
+        {
+            if (fillingObs) return;
+            string t = inScene.Text.Trim();
+            r.ObsInScene = t == onStream ? "" : t;
+            Changed();
+        };
+        inScene.DropDown += delegate { FillKeepText(inScene, Concat(new[] { onStream }, app.Obs.Scenes), ref fillingObs); };
 
         // row 4: which topic it's in
         int y3 = y2 + 46;
@@ -543,6 +582,7 @@ public partial class MainForm
         {
             bool isGift = r.Trigger == LiveEvent.Gift, isLikes = r.Trigger == LiveEvent.Likes, isChat = r.Trigger == LiveEvent.Chat;
             bool isText = r.Kind == GiftRule.KindText, isSound = r.Kind == GiftRule.KindSound, isCounter = r.Kind == GiftRule.KindCounter;
+            bool isObs = r.Kind == GiftRule.KindObs;
             gift.Visible = isGift;
             cmd.Visible = isChat;
             amountLbl.Visible = amount.Visible = isGift || isLikes || isChat;
@@ -551,15 +591,20 @@ public partial class MainForm
             amount.Minimum = isLikes ? 1 : 0;
             amount.Value = Math.Max(amount.Minimum, Math.Min(amount.Maximum, isLikes ? r.EveryLikes : isChat ? r.UserCooldownSec : r.MinCoins));
             building = false;
-            key.Visible = !isSound && !isCounter;
-            holdLbl.Visible = hold.Visible = !isText && !isSound && !isCounter;
+            key.Visible = !isSound && !isCounter && !isObs;
+            holdLbl.Visible = hold.Visible = !isText && !isSound && !isCounter && !isObs;
+            obsDo.Visible = isObs;
+            obsTarget.Visible = isObs && r.ObsNeedsTarget;
+            obsSecsLbl.Visible = obsSecs.Visible = isObs && r.ObsTimed;
+            inSceneLbl.Visible = inScene.Visible = isObs && (r.ObsDo == GiftRule.ObsShow || r.ObsDo == GiftRule.ObsHide);
+            timesLbl.Visible = times.Visible = !isObs;   // OBS actions run once per trigger
             text.Visible = enter.Visible = isText;
             sound.Visible = browse.Visible = volLbl.Visible = vol.Visible = isSound;
             sound.Text = r.SoundFile.Length > 0 ? Path.GetFileName(r.SoundFile) : L.T("(no sound picked)");
             counterBox.Visible = opBox.Visible = isCounter;
             opAmount.Visible = isCounter && r.Op != GiftRule.OpCoins;
             if (isCounter && !isGift && r.Op == GiftRule.OpCoins) { r.Op = GiftRule.OpAdd; opBox.SelectedIndex = 0; }   // only gifts have coins
-            perGift.Visible = isGift && !isSound && !(isCounter && r.Op == GiftRule.OpCoins);   // sounds play once per gift send
+            perGift.Visible = isGift && !isSound && !isObs && !(isCounter && r.Op == GiftRule.OpCoins);   // sounds and OBS: once per gift send
             if (key != keyCapBtn) key.Text = isText ? (r.Key.IsSet ? L.F("First: {0}", r.Key) : L.T("First: no key")) : r.Key.ToString();
             key.ForeColor = r.Key.IsSet ? UI.Text : UI.Muted;
             testLabel();
@@ -580,6 +625,12 @@ public partial class MainForm
             layout();
             Changed();
         };
+        obsDo.SelectedIndexChanged += delegate
+        {
+            r.ObsDo = GiftRule.ObsDos[obsDo.SelectedIndex];
+            layout();
+            Changed();
+        };
         trigger.SelectedIndexChanged += delegate
         {
             r.Trigger = GiftRule.Triggers[trigger.SelectedIndex];
@@ -596,6 +647,8 @@ public partial class MainForm
                 if (counterBox.Items.Count > app.S.Counters.Count) counterBox.Items.RemoveAt(counterBox.Items.Count - 1);
                 counterBox.SelectedIndex = 0;
             }
+            if (r.Kind == GiftRule.KindObs && !app.Obs.Connected)
+                ActionsMessage(L.T("Connect OBS on the OBS page, then pick scenes and sources from the list (or type the name)."), UI.Warn);
             layout();
             Changed();
         };
@@ -770,6 +823,30 @@ public partial class MainForm
                 return d.FileName;
             }
         }
+    }
+
+    static string[] Concat(string[] a, string[] b)
+    {
+        string[] all = new string[a.Length + b.Length];
+        a.CopyTo(all, 0);
+        b.CopyTo(all, a.Length);
+        return all;
+    }
+
+    // Replaces a typeable combo's list without changing what's typed in it.
+    static void FillKeepText(ComboBox c, string[] items, ref bool filling)
+    {
+        string text = c.Text;
+        filling = true;
+        try
+        {
+            c.BeginUpdate();
+            c.Items.Clear();
+            c.Items.AddRange(items);
+            c.EndUpdate();
+            c.Text = text;
+        }
+        finally { filling = false; }
     }
 
     ComboBox GiftCombo(Control parent, int x, int y, int w)

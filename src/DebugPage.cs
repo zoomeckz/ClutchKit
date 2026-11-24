@@ -13,7 +13,7 @@ using System.Windows.Forms;
 
 public partial class MainForm
 {
-    static readonly string[] PageFiles = { "1-general", "2-counters", "3-widgets", "4-actions", "5-tiktok", "6-overlay", "7-settings", "8-debug" };
+    static readonly string[] PageFiles = { "1-general", "2-counters", "3-widgets", "4-actions", "5-tiktok", "6-overlay", "7-obs", "8-settings", "9-debug" };
     static Font mono;
 
     Timer debugTimer;

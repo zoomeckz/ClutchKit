@@ -29,3 +29,9 @@ The only internet connection is the optional TikTok LIVE connection: when the us
 on "Connect automatically"), ClutchKit sends the TikTok username and the user's own Euler Stream API key to
 Euler Stream (`wss://ws.eulerstream.com`), which sends back the LIVE's events. The API key is stored in
 `settings.ini` on the user's computer and is not sent anywhere else.
+
+The optional OBS connection: when the user presses **Connect** on the OBS page (or turns on "Connect
+automatically"), ClutchKit connects to the OBS WebSocket server at the address the user entered (normally the
+same computer, `127.0.0.1`) and sends it only the commands of the user's own actions (switch scene, show or hide a
+source, save the replay buffer, start or stop recording, mute). The OBS password is stored in `settings.ini` on
+the user's computer and is not sent anywhere else.

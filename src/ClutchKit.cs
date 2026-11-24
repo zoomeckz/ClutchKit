@@ -2,8 +2,8 @@
 // ----------------------------------------------------------------------------------
 // Counters (as many as you like, each with its own hotkeys and its own look) shown in one overlay,
 // stream widgets (goal bars, subathon timer, top lists: Widgets.cs, WidgetsPage.cs), and actions: LIVE gifts, follows,
-// shares, joins, likes and chat commands play sounds, press keys or change counters (Actions.cs, TikTok.cs, ActionsPage.cs, Packs.cs).
-// Menu: General > Counters > Widgets > Actions > TikTok LIVE > Overlay (how it gets on stream) > Settings (app options) > Debug (Debug.cs, DebugPage.cs).
+// shares, joins, likes and chat commands play sounds, press keys, change counters or control OBS (Actions.cs, TikTok.cs, ActionsPage.cs, Packs.cs, Obs.cs).
+// Menu: General > Counters > Widgets > Actions > TikTok LIVE > Overlay (how it gets on stream) > OBS (ObsPage.cs) > Settings (app options) > Debug (Debug.cs, DebugPage.cs).
 // Overlay modes:
 //   - Link overlay: a "data:" link pasted once into LIVE Studio (Add source > Link). It loads the
 //     overlay script from this app (http://127.0.0.1:<port>, this PC only), so every change made in
@@ -40,14 +40,14 @@ using Microsoft.Win32;
 [assembly: AssemblyProduct("ClutchKit")]
 [assembly: AssemblyCompany("ClutchKit")]
 [assembly: AssemblyCopyright("Copyright (c) 2026 ClutchKit")]
-[assembly: AssemblyVersion("3.3.0.0")]
-[assembly: AssemblyFileVersion("3.3.0.0")]
+[assembly: AssemblyVersion("3.4.0.0")]
+[assembly: AssemblyFileVersion("3.4.0.0")]
 [assembly: AssemblyInformationalVersion("3.3")]
 
 static class Program
 {
     public const string Name = "ClutchKit";
-    public const string Version = "3.3";
+    public const string Version = "3.4";
     // Shared with the older "Death Counter" builds so old and new never run (and count) at the same time.
     public static string MutexName = "Local\\DeathCounterTikTok";
 
@@ -486,6 +486,10 @@ public class Settings
     // TikTok LIVE connection
     public string TikTokUser = "", TikTokKey = "";
     public bool AutoConnect = false;
+    // OBS Studio (its WebSocket server: Tools > WebSocket Server Settings)
+    public string ObsHost = "127.0.0.1", ObsPassword = "";
+    public int ObsPort = 4455;
+    public bool ObsAuto = false;
     // stream widgets
     public const int MaxGoals = 8;
     public List<Goal> Goals = new List<Goal>();
@@ -576,6 +580,10 @@ public class Settings
         if (kv.TryGetValue("tiktok.user", out v)) s.TikTokUser = v.Trim();
         if (kv.TryGetValue("tiktok.apikey", out v)) s.TikTokKey = v.Trim();
         if (kv.TryGetValue("tiktok.autoconnect", out v)) s.AutoConnect = ParseBool(v, false);
+        if (kv.TryGetValue("obs.host", out v)) s.ObsHost = v.Trim();
+        if (kv.TryGetValue("obs.port", out v)) s.ObsPort = ParseInt(v, s.ObsPort, 1, 65535);
+        if (kv.TryGetValue("obs.password", out v)) s.ObsPassword = v.Trim();
+        if (kv.TryGetValue("obs.autoconnect", out v)) s.ObsAuto = ParseBool(v, false);
         if (kv.TryGetValue("language", out v)) s.Language = Array.IndexOf(L.Codes, v.Trim()) >= 0 ? v.Trim() : "";
         if (kv.TryGetValue("lastpage", out v)) s.LastPage = ParseInt(v, 0, 0, 20);
         if (kv.TryGetValue("debug", out v)) s.Debug = ParseBool(v, false);
@@ -745,6 +753,10 @@ public class Settings
         b.AppendLine("tiktok.user=" + TikTokUser);
         b.AppendLine("tiktok.apiKey=" + TikTokKey);
         b.AppendLine("tiktok.autoConnect=" + AutoConnect);
+        b.AppendLine("obs.host=" + ObsHost);
+        b.AppendLine("obs.port=" + ObsPort);
+        b.AppendLine("obs.password=" + ObsPassword);
+        b.AppendLine("obs.autoConnect=" + ObsAuto);
         b.AppendLine("language=" + Language);
         b.AppendLine("lastPage=" + LastPage);
         b.AppendLine("debug=" + Debug);
@@ -807,6 +819,7 @@ public class App : ApplicationContext
 
     public GiftEngine Engine;
     public TikTokLive TikTok;
+    public ObsLink Obs;
     public Widgets W;
     readonly List<string> log = new List<string>();
 
@@ -864,6 +877,7 @@ public class App : ApplicationContext
         Engine = new GiftEngine(this);
         W = new Widgets(this);
         TikTok = new TikTokLive(this);
+        Obs = new ObsLink(this);
         BuildState();
 
         server = new OverlayServer(S.Port, this);
@@ -874,6 +888,7 @@ public class App : ApplicationContext
         hook = SetWindowsHookEx(WH_KEYBOARD_LL, hookProc, GetModuleHandle(null), 0);
         if (!testMode) StartListeners();
         if (!testMode && S.AutoConnect && S.TikTokUser.Length > 0 && S.TikTokKey.Length > 0) TikTok.Start(S.TikTokUser, S.TikTokKey);
+        if (!testMode && S.ObsAuto) Obs.Start(S.ObsHost, S.ObsPort, S.ObsPassword);
 
         if (S.Mode == "window") ShowCapture();
         if (!S.StartInTray) ShowMain();
@@ -1522,6 +1537,7 @@ public class App : ApplicationContext
         W.Shutdown();
         if (hook != IntPtr.Zero) { UnhookWindowsHookEx(hook); hook = IntPtr.Zero; }
         TikTok.Stop();
+        Obs.Stop();
         Engine.Clear();
         server.Stop();
         if (tray != null) { tray.Visible = false; tray.Dispose(); }
@@ -1572,6 +1588,26 @@ public static class Overlay
     }
 
     public static string ViewLink(int port, string view, string name) { return Encode(ViewHtml(port, view, name)); }
+
+    // A plain web address for OBS (Browser source), e.g. http://127.0.0.1:8787/obs/goal/2.
+    // view null = the counters; "goal:2" -> /obs/goal/2, "top:gifters" -> /obs/top/gifters.
+    public static string ObsLink(int port, string view)
+    {
+        return "http://127.0.0.1:" + port + "/obs" + (view == null ? "" : "/" + view.Replace(':', '/'));
+    }
+
+    // The page behind an OBS link, or null if the address isn't one.
+    public static string ObsPage(int port, string path)
+    {
+        if (path == "/obs" || path == "/obs/") return ViewHtml(port, null, "counters");
+        if (!path.StartsWith("/obs/")) return null;
+        string rest = path.Substring(5).TrimEnd('/');
+        if (rest == "timer") return ViewHtml(port, "timer", "timer");
+        if (rest == "top/gifters" || rest == "top/likers") return ViewHtml(port, rest.Replace('/', ':'), "top");
+        int id;
+        if (rest.StartsWith("goal/") && int.TryParse(rest.Substring(5), out id) && id > 0) return ViewHtml(port, "goal:" + id, "goal");
+        return null;
+    }
 
     // LIVE Studio rules for Link sources: the link must contain "http(s)://" (or it gets
     // "https://" stuck in front) and a "name.letters" part (the "overlay.html" in the title).
@@ -1793,9 +1829,15 @@ public class OverlayServer
                     else if (path == "/api/state") bytes = app.StateBytes;
                     else if (path == "/api/count") bytes = Encoding.UTF8.GetBytes("{\"count\":" + app.FirstCount + "}");   // links from older versions
                     else if (path == "/overlay.js") { type = "application/javascript"; bytes = ScriptBytes; }
-                    else { status = "404 Not Found"; type = "text/plain"; bytes = Encoding.UTF8.GetBytes("Not found"); }
+                    else
+                    {
+                        string page = Overlay.ObsPage(port, path);   // OBS browser source
+                        if (page != null) { type = "text/html"; bytes = Encoding.UTF8.GetBytes(page); }
+                        else { status = "404 Not Found"; type = "text/plain"; bytes = Encoding.UTF8.GetBytes("Not found"); }
+                    }
                     // who asks for the overlay, and how often (Debug page: is LIVE Studio really loading it?)
-                    Diag.Count(path == "/api/state" ? "overlay.state" : path == "/overlay.js" ? "overlay.script" : "overlay.other");
+                    Diag.Count(path == "/api/state" ? "overlay.state" : path == "/overlay.js" ? "overlay.script" :
+                               path.StartsWith("/obs") && status.StartsWith("200") ? "overlay.obspage" : "overlay.other");
                     Diag.Mark("overlay");
                     if (agent.Length > 0) Diag.Note("overlay.agent", agent.Length > 160 ? agent.Substring(0, 160) : agent);
                     if (path != "/api/state") Diag.Write("overlay", method + " " + path + " -> " + status + (agent.Length > 0 ? " (" + agent + ")" : ""));
@@ -2580,6 +2622,7 @@ public partial class MainForm : Form
         AddPage(L.T("Actions"), BuildActionsPage());
         AddPage(L.T("TikTok LIVE"), BuildTikTokPage());
         AddPage(L.T("Overlay"), BuildOverlayPage());
+        AddPage(L.T("OBS"), BuildObsPage());
         AddPage(L.T("Settings"), BuildSettingsPage());
         AddPage(L.T("Debug"), BuildDebugPage());
         loading = false;
@@ -3019,6 +3062,8 @@ public partial class MainForm : Form
         app.CountChanged -= OnCount;
         app.SettingsChanged -= OnSettings;
         app.W.Changed -= OnWidgetsChanged;
+        app.Obs.StatusChanged -= OnObsStatus;
+        app.Obs.ListsChanged -= OnObsStatus;
         UnhookActionPages();
         if (debugTimer != null) debugTimer.Dispose();
         base.OnFormClosed(e);

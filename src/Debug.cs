@@ -153,6 +153,8 @@ public static class Diag
         {
             string key = app != null && app.S != null ? app.S.TikTokKey : "";
             if (key != null && key.Length >= 6) s = s.Replace(key, "<api key>");
+            string obsPw = app != null && app.S != null ? app.S.ObsPassword : "";
+            if (obsPw != null && obsPw.Length >= 4) s = s.Replace(obsPw, "<obs password>");
             s = Regex.Replace(s, @"(apiKey=)[^&\s""']+", "$1<api key>", RegexOptions.IgnoreCase);
             string home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
             if (home.Length > 3) s = Regex.Replace(s, Regex.Escape(home), "%USERPROFILE%", RegexOptions.IgnoreCase);
@@ -307,6 +309,7 @@ public static class Diag
         StringBuilder b = new StringBuilder();
         b.AppendLine("TikTok: " + a.TikTok.Current + " - " + a.TikTok.Detail);
         b.AppendLine("TikTok messages: " + CountsWith("tiktok.msg."));
+        b.AppendLine("OBS: " + a.Obs.Current + " - " + a.Obs.Detail + ", actions done " + Get("obs.actions") + ", failed " + Get("obs.actions.failed"));
         b.AppendLine("Events: " + CountsWith("event."));
         b.AppendLine("Actions queued " + Get("actions.queued") + ", skipped (queue full) " + Get("actions.dropped") + ", cooling down " + Get("actions.cooling") +
                      ", waiting now " + a.Engine.Waiting);
@@ -365,6 +368,14 @@ public static class Diag
         b.AppendLine("Events: " + CountsWith("event."));
 
         b.AppendLine();
+        b.AppendLine("== OBS ==");
+        b.AppendLine("State: " + a.Obs.Current + " - " + Redact(a.Obs.Detail) + (a.Obs.Version.Length > 0 ? ", OBS " + a.Obs.Version : ""));
+        b.AppendLine("Address: " + Redact(s.ObsHost) + ":" + s.ObsPort + ", password: " + (s.ObsPassword.Length > 0 ? "set" : "not set") + ", connect automatically: " + YesNo(s.ObsAuto));
+        b.AppendLine("Connection attempts: " + Get("obs.connects") + ", connected: " + Get("obs.connected") + ", lists: " + NoteOf("obs.lists"));
+        b.AppendLine("Requests: " + Get("obs.requests") + ", failed " + Get("obs.failed") + "; actions done " + Get("obs.actions") + ", failed " + Get("obs.actions.failed"));
+        b.AppendLine("Browser source pages loaded: " + Get("overlay.obspage"));
+
+        b.AppendLine();
         b.AppendLine("== Actions ==");
         b.AppendLine("Actions on: " + YesNo(s.ActionsOn) + ", on/off key: " + s.PauseKey + ", only in: " + (s.OnlyProcess.Length > 0 ? s.OnlyProcess : "(any program)") +
                      ", wait between: " + s.GapMs + " ms, queue max: " + s.MaxQueue + ", waiting now: " + a.Engine.Waiting);
@@ -380,9 +391,10 @@ public static class Diag
             byTrigger.TryGetValue(r.Trigger, out n); byTrigger[r.Trigger] = n + 1;
             byKind.TryGetValue(r.Kind, out n); byKind[r.Kind] = n + 1;
             string name = "\"" + r.Summary + "\"";
-            if (!r.CanRun) problems.Add(name + ": nothing to do yet (no key / text / sound)");
+            if (!r.CanRun) problems.Add(name + ": nothing to do yet (no key / text / sound / scene)");
             else if (r.Kind == GiftRule.KindSound && !File.Exists(r.SoundFile)) problems.Add(name + ": sound file is missing (" + Redact(r.SoundFile) + ")");
             else if (r.Kind == GiftRule.KindCounter && s.Find(r.CounterId) == null) problems.Add(name + ": its counter was removed");
+            else if (r.Kind == GiftRule.KindObs && r.Enabled && !a.Obs.Connected) problems.Add(name + ": OBS isn't connected");
             if (r.Enabled && !s.GroupOn(r.GroupId)) problems.Add(name + ": its topic is switched off");
         }
         List<string> parts = new List<string>();

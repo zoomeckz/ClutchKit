@@ -1,10 +1,10 @@
-ClutchKit 3.3 - stream toolkit for TikTok LIVE Studio
-======================================================
+ClutchKit 3.4 - stream toolkit for TikTok LIVE Studio and OBS Studio
+=====================================================================
 Counters for anything you want to track (deaths, wins, kills, attempts...), each with
 its own hotkeys, shown live on stream with your own font, colors and animations.
 Widgets: goal bars, a subathon timer and top gifter / liker lists.
 Actions: gifts, follows, shares, joins, likes and chat commands play sound alerts,
-press keys in your game or change your counters.
+press keys in your game, change your counters or control OBS.
 
 
 INSTALL
@@ -37,6 +37,28 @@ In ClutchKit, open "Display":
     Pick "Capture window", then in LIVE Studio: Add source > Window capture >
     "ClutchKit - Overlay". Keep that window open (it can sit behind your
     game, just don't minimize it).
+
+
+USING OBS STUDIO INSTEAD
+------------------------
+Open the "OBS" page in ClutchKit.
+
+  Counters and widgets:
+    1. Pick what you want (Counters, a goal, the subathon timer or a top list)
+       and click "Copy OBS link".
+    2. In OBS: Sources > + > Browser > OK, paste the link into URL, set the
+       suggested width and height, click OK. Do this once per overlay.
+
+  Let actions control OBS (OBS 28 or newer):
+    1. In OBS: Tools > WebSocket Server Settings > tick "Enable WebSocket server".
+       Click "Show Connect Info" to see the port and password.
+    2. In ClutchKit, enter the port and password (address 127.0.0.1 when OBS runs
+       on this PC) and click "Connect". Tick "Connect automatically" so it connects
+       by itself whenever OBS is open.
+    3. On the "Actions" page pick "Control OBS" (see ACTIONS below).
+
+  To stream to TikTok from OBS you need a TikTok stream key; not every account has
+  one. Gifts and other LIVE events still come through the TikTok LIVE page below.
 
 
 USING IT
@@ -97,6 +119,11 @@ ACTIONS (SOUND ALERTS, KEYS IN YOUR GAME)
                    before typing (T opens the chat in Minecraft).
      Change a counter  add, subtract, set to, or add the gift's coins
                    (e.g. every Rose = Deaths +1, or a coin counter).
+     Control OBS   switch scene, show source, hide source, mute, unmute - "for (s)"
+                   puts it back after that many seconds (0 = it stays). "in scene" is
+                   where the source is; leave it on "(the scene on stream)" if unsure.
+                   Also: save replay (the replay buffer must be running), start or
+                   stop recording. Runs once per trigger (a x10 combo = once).
    And how often:
      Times         how many times each time it's triggered.
      cooldown (s)  don't run it again within this many seconds
@@ -156,5 +183,7 @@ The keyboard is only used to react to your chosen hotkeys; nothing you type is s
 The only internet connection is the TikTok LIVE connection, and only when you
 connect: your TikTok username and Euler Stream key go to Euler Stream, which
 sends back your LIVE's gifts. The key is saved in settings.ini on your PC.
+The OBS connection (only if you turn it on) goes to the OBS address you enter, normally
+this PC. Its password is saved in settings.ini too.
 The top lists keep viewer names and their coins/likes in leaderboard.txt and live.txt
 on your PC only ("Clear" on the Widgets page empties them).
